@@ -12,6 +12,7 @@ import android.os.Environment
 import android.os.PowerManager
 import android.os.StatFs
 import android.os.storage.StorageManager
+import androidx.documentfile.provider.DocumentFile
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -93,7 +94,8 @@ private enum class FileKind(val title: String) {
 }
 private data class ScannedFile(
     val uri: Uri, val name: String, val size: Long, val modified: Long,
-    val kind: FileKind, val location: String, val sha256: String? = null
+    val kind: FileKind, val location: String, val sha256: String? = null,
+    val isDocument: Boolean = false
 )
 
 @Composable
@@ -181,6 +183,15 @@ private fun Cleaning(context: Context) {
     var cacheFreeBefore by remember { mutableLongStateOf(-1L) }
     var lastDeleted by remember { mutableStateOf("Пока ничего не удалено.") }
     val scope = rememberCoroutineScope()
+    var extraFolder by remember { mutableStateOf(prefs.getString("extra_folder_uri", null)) }
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+            extraFolder = uri.toString()
+            prefs.edit().putString("extra_folder_uri", uri.toString()).apply()
+            status = "Дополнительная папка подключена. Запусти поиск ещё раз."
+        }
+    }
     val cacheLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         val freeNow = storageStats(context).second
         val gained = if (cacheFreeBefore >= 0) (freeNow - cacheFreeBefore).coerceAtLeast(0) else 0L
@@ -205,8 +216,11 @@ private fun Cleaning(context: Context) {
                 val result = withContext(Dispatchers.IO) {
                     var count = 0; var bytes = 0L; val removed = mutableSetOf<String>()
                     selectedFiles.forEach { file ->
-                        val target = file.uri.path?.let { java.io.File(it) }
-                        if (target != null && runCatching { target.delete() }.getOrDefault(false)) { count++; bytes += file.size; removed.add(file.uri.toString()) }
+                        val deleted = runCatching {
+                            if (file.isDocument) android.provider.DocumentsContract.deleteDocument(context.contentResolver, file.uri)
+                            else file.uri.path?.let { java.io.File(it).delete() } ?: false
+                        }.getOrDefault(false)
+                        if (deleted) { count++; bytes += file.size; removed.add(file.uri.toString()) }
                     }
                     Triple(count, bytes, removed)
                 }
@@ -226,10 +240,21 @@ private fun Cleaning(context: Context) {
             Button(onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth()) { Text("Разрешить доступ ко всем файлам") }
             InfoCard("Доступ Android", "Включи специальное разрешение в системных настройках и вернись в приложение.")
         } else InfoCard("Доступ предоставлен", "Проверяется доступное общее хранилище. Закрытые системные каталоги Android могут быть недоступны.")
+        Button(enabled = !scanning && !deleting, onClick = { folderPicker.launch(extraFolder?.let(Uri::parse)) }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (extraFolder == null) "Добавить папку для полного сканирования" else "Выбрать другую дополнительную папку")
+        }
+        if (extraFolder != null) {
+            InfoCard("Дополнительная папка", "Папка подключена. Она будет включена в следующий поиск.")
+            TextButton(onClick = { extraFolder = null; prefs.edit().remove("extra_folder_uri").apply(); status = "Дополнительная папка отключена." }) { Text("Отключить дополнительную папку") }
+        }
         Button(enabled = hasAccess && !scanning && !deleting, onClick = {
             scanning = true; scanned = false; showLocked = false; foundCount = 0; selected = emptySet(); status = "Идёт поиск файлов…"
             scope.launch {
-                val result = withContext(Dispatchers.IO) { scanAllFiles { n -> if (n % 100 == 0) scope.launch(Dispatchers.Main) { foundCount = n } } }
+                val result = withContext(Dispatchers.IO) {
+                    val shared = scanAllFiles { n -> if (n % 100 == 0) scope.launch(Dispatchers.Main) { foundCount = n } }
+                    val extra = extraFolder?.let { scanDocumentTree(context, Uri.parse(it)) }.orEmpty()
+                    (shared + extra).distinctBy { it.uri }
+                }
                 files = result
                 selected = result.filter { file -> file.kind !in protected && ((allowGif && file.kind == FileKind.GIF) || (allowArchives && file.kind == FileKind.ARCHIVE) || (allowOld && file.modified > 0 && file.modified < cutoff)) }.map { it.uri.toString() }.toSet()
                 limit = 100; scanned = true; scanning = false
@@ -351,6 +376,36 @@ private fun hashFileFromFile(path: String?): String? = runCatching {
     }
     digest.digest().joinToString("") { byte -> "%02x".format(byte) }
 }.getOrNull()
+
+private fun scanDocumentTree(context: Context, treeUri: Uri): List<ScannedFile> {
+    val root = DocumentFile.fromTreeUri(context, treeUri) ?: return emptyList()
+    val result = mutableListOf<ScannedFile>()
+    val visited = HashSet<String>()
+    fun walk(folder: DocumentFile, depth: Int) {
+        if (depth > 30 || result.size >= 50000 || !visited.add(folder.uri.toString())) return
+        val children = runCatching { folder.listFiles() }.getOrDefault(emptyArray())
+        children.forEach { item ->
+            if (result.size >= 50000) return
+            if (item.isDirectory) walk(item, depth + 1)
+            else if (item.isFile && item.canRead()) {
+                val name = item.name ?: "Без имени"
+                val lower = name.lowercase(Locale.ROOT)
+                val mime = item.type.orEmpty().lowercase(Locale.ROOT)
+                val kind = when {
+                    lower.endsWith(".gif") -> FileKind.GIF
+                    lower.matches(Regex(".*\\\\.(zip|rar|7z|tar|gz|bz2|xz|apk|xapk|apks)$")) -> FileKind.ARCHIVE
+                    mime.startsWith("image/") || lower.matches(Regex(".*\\\\.(jpg|jpeg|png|webp|heic|bmp)$")) -> FileKind.PHOTO
+                    mime.startsWith("video/") || lower.matches(Regex(".*\\\\.(mp4|mkv|mov|avi|webm|3gp)$")) -> FileKind.VIDEO
+                    mime.startsWith("audio/") || lower.matches(Regex(".*\\\\.(mp3|m4a|aac|wav|flac|ogg|opus)$")) -> FileKind.AUDIO
+                    else -> FileKind.OTHER
+                }
+                result.add(ScannedFile(item.uri, name, item.length(), item.lastModified() / 1000, kind, item.parentFile?.name ?: "Выбранная папка", isDocument = true))
+            }
+        }
+    }
+    walk(root, 0)
+    return result
+}
 
 private fun hashFile(context: Context, uri: Uri): String? = runCatching {
     val digest = java.security.MessageDigest.getInstance("SHA-256")
