@@ -476,6 +476,15 @@ private fun Cleaning(context: Context) {
     )
     Column(verticalArrangement = Arrangement.spacedBy(17.dp)) {
         val stats = rememberStorageStats(context)
+        val scanRotation by androidx.compose.animation.core.rememberInfiniteTransition(label = "cleanup_scan")
+            .animateFloat(
+                initialValue = 0f,
+                targetValue = 360f,
+                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                    animation = tween(1700, easing = androidx.compose.animation.core.LinearEasing)
+                ),
+                label = "cleanup_scan_rotation"
+            )
         ScreenHeading("SMART CLEANUP / 01", "Очистка", "Порядок в хранилище — без риска удалить важные файлы.")
 
         Column(
@@ -533,8 +542,29 @@ private fun Cleaning(context: Context) {
                 }
             }
             if (scanning) {
-                LinearProgressIndicator(Modifier.fillMaxWidth(), color = Accent, trackColor = Color.White.copy(alpha = .12f))
-                Text("Просматриваю хранилище · найдено: " + foundCount, color = Color.White.copy(alpha = .78f), fontSize = 11.sp)
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Color(0xFF18272B)).padding(15.dp),
+                    horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(Modifier.size(94.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        Canvas(Modifier.fillMaxSize()) {
+                            drawArc(Color.White.copy(alpha = .12f), 0f, 360f, false, style = Stroke(width = 5.dp.toPx()))
+                            drawArc(Brush.sweepGradient(listOf(Color.Transparent, Accent, Color.White, Accent)), scanRotation, 105f, false, style = Stroke(width = 5.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                            val radius = size.minDimension * .39f
+                            repeat(6) { index ->
+                                val angle = Math.toRadians((scanRotation + index * 60f).toDouble())
+                                val x = center.x + kotlin.math.cos(angle).toFloat() * radius
+                                val y = center.y + kotlin.math.sin(angle).toFloat() * radius
+                                drawCircle(if (index % 2 == 0) Peach else Accent, radius = 3.5.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
+                            }
+                        }
+                        Text("⌕", color = Color.White, fontSize = 30.sp)
+                    }
+                    Text("ИЩЕМ НЕНУЖНЫЕ ФАЙЛЫ", color = Accent, fontSize = 10.sp, letterSpacing = 1.4.sp)
+                    LinearProgressIndicator(Modifier.fillMaxWidth(), color = Accent, trackColor = Color.White.copy(alpha = .12f))
+                    Text("Просматриваю хранилище · найдено: " + foundCount, color = Color.White.copy(alpha = .78f), fontSize = 11.sp)
+                }
             }
         }
 
