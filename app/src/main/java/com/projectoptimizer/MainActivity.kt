@@ -1,6 +1,8 @@
 package com.projectoptimizer
 
 import android.app.ActivityManager
+import android.content.Intent
+import android.provider.Settings
 import android.content.Context
 import android.net.Uri
 import android.os.Build
@@ -42,6 +44,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -53,7 +56,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.documentfile.provider.DocumentFile
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -141,13 +145,21 @@ private fun Dashboard(context: Context) {
     MetricCard("Свободно", formatBytes(storage.second), Modifier.fillMaxWidth())
     MetricCard("Свободная RAM", memoryInfo(context), Modifier.fillMaxWidth())
     MetricCard("Тепловое состояние", thermalInfo(context), Modifier.fillMaxWidth())
-    InfoCard("Следующий шаг", "Открой «Очистка» и выбери папку, которую приложение сможет анализировать.")
+    InfoCard("Доступ к файлам", if (hasStorageAccess(context)) "Доступ к общему хранилищу предоставлен." else "Открой «Очистка» и выдай разрешение «Доступ ко всем файлам».")
 }
 
 @Composable
 private fun Cleaning(context: Context) {
     val prefs = remember { context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE) }
-    var treeUri by remember { mutableStateOf(prefs.getString("tree_uri", null)?.let(Uri::parse)) }
+    var hasAllFilesAccess by remember { mutableStateOf(hasStorageAccess(context)) }
+    DisposableEffect(context) {
+        val lifecycle = (context as? ComponentActivity)?.lifecycle
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) hasAllFilesAccess = hasStorageAccess(context)
+        }
+        lifecycle?.addObserver(observer)
+        onDispose { lifecycle?.removeObserver(observer) }
+    }
     var files by remember { mutableStateOf<List<ScannedFile>>(emptyList()) }
     var scanning by remember { mutableStateOf(false) }
     var scanned by remember { mutableStateOf(false) }
@@ -159,22 +171,6 @@ private fun Cleaning(context: Context) {
     var lockedUris by remember { mutableStateOf(prefs.getStringSet("locked_uris", emptySet())?.toSet() ?: emptySet()) }
     var oldDays by remember { mutableIntStateOf(prefs.getInt("old_days", 180)) }
     val scope = rememberCoroutineScope()
-    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                )
-            }
-            treeUri = uri
-            prefs.edit().putString("tree_uri", uri.toString()).apply()
-            files = emptyList()
-            scanned = false
-            status = "Папка подключена. Нажми «Проверить файлы»."
-        }
-    }
-
     val protectedKinds = setOf(FileKind.PHOTO, FileKind.VIDEO, FileKind.AUDIO)
     val duplicateUris = remember(files) {
         files.filter { it.size > 0 && it.sha256 != null }.groupBy { it.sha256 }.values
@@ -201,7 +197,7 @@ private fun Cleaning(context: Context) {
                     scope.launch {
                         val deleted = withContext(Dispatchers.IO) {
                             candidates.count { runCatching {
-                                DocumentFile.fromSingleUri(context, it.uri)?.delete() == true
+                                it.uri.path?.let { path -> java.io.File(path).delete() } == true
                             }.getOrDefault(false) }
                         }
                         status = "Удалено файлов: $deleted. Запусти проверку ещё раз для обновления."
@@ -215,28 +211,30 @@ private fun Cleaning(context: Context) {
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         val stats = storageStats()
-        InfoCard("Внутренняя память", "Всего: ${formatBytes(stats.first)}\nСвободно: ${formatBytes(stats.second)}\nЗанято: ${formatBytes(stats.first - stats.second)}")
-        Button(onClick = { folderPicker.launch(treeUri) }, modifier = Modifier.fillMaxWidth()) {
-            Text(if (treeUri == null) "Выбрать папку для анализа" else "Изменить выбранную папку")
+        InfoCard("Память телефона", "Всего: ${formatBytes(stats.first)}\nСвободно: ${formatBytes(stats.second)}\nЗанято: ${formatBytes((stats.first - stats.second).coerceAtLeast(0))}")
+        if (!hasAllFilesAccess) {
+            Button(onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth()) {
+                Text("Разрешить доступ ко всем файлам")
+            }
+            InfoCard("Разрешение Android", "Откроются системные настройки специального доступа. Включи «Разрешить доступ для управления всеми файлами», затем вернись сюда.")
+        } else {
+            InfoCard("Доступ предоставлен", "Сканируется общее пользовательское хранилище без ручного выбора папки.")
         }
-        Text(treeUri?.let { "Подключено: ${DocumentFile.fromTreeUri(context, it)?.name ?: "папка"}" }
-            ?: "Доступ ещё не предоставлен", color = Muted, fontSize = 12.sp)
         Button(
-            enabled = treeUri != null && !scanning,
+            enabled = hasAllFilesAccess && !scanning,
             onClick = {
-                val uri = treeUri ?: return@Button
                 scanning = true
-                status = "Проверяю файлы…"
+                status = "Проверяю доступные файлы общего хранилища…"
                 scope.launch {
-                    val result = withContext(Dispatchers.IO) { scanTree(context, uri) }
+                    val result = withContext(Dispatchers.IO) { scanAllFiles() }
                     files = result
                     scanned = true
                     scanning = false
-                    status = "Проверка завершена. Найдено файлов: ${result.size}."
+                    status = "Проверка завершена. Найдено файлов: ${result.size}. Некоторые защищённые каталоги недоступны Android."
                 }
             },
             modifier = Modifier.fillMaxWidth()
-        ) { Text(if (scanning) "Идёт проверка…" else "Проверить файлы") }
+        ) { Text(if (scanning) "Идёт проверка…" else "Проверить всё хранилище") }
         InfoCard("Результат анализа", status)
         if (scanned) {
             MetricCard("Можно освободить по текущим правилам", formatBytes(reclaimable), Modifier.fillMaxWidth())
@@ -281,7 +279,7 @@ private fun Cleaning(context: Context) {
                 }) { Text("$days") }
             }
         }
-        InfoCard("Важные ограничения", "Android выдаёт доступ только к выбранной папке и её содержимому. Чтобы проверить другую папку, подключи её отдельно. Приватные данные и кэш других приложений недоступны обычному приложению.")
+        InfoCard("Ограничения Android", "Даже с этим разрешением Android закрывает часть системных каталогов, включая приватные данные приложений и некоторые папки Android/data и Android/obb.")
         InfoCard("Проверка дубликатов", "Дубликаты сравниваются по SHA-256 содержимого, а не только по размеру. Для защиты оставляется возможность вручную проверить список перед удалением.")
     }
 }
@@ -299,35 +297,54 @@ private fun SettingToggle(title: String, description: String, checked: Boolean, 
     }
 }
 
-private fun scanTree(context: Context, treeUri: Uri): List<ScannedFile> {
-    val root = DocumentFile.fromTreeUri(context, treeUri) ?: return emptyList()
+private fun scanAllFiles(): List<ScannedFile> {
+    val root = Environment.getExternalStorageDirectory()
     val result = mutableListOf<ScannedFile>()
-    fun walk(dir: DocumentFile, path: String, depth: Int) {
-        if (depth > 12 || result.size >= 5000) return
-        dir.listFiles().forEach { file ->
-            if (file.isDirectory) walk(file, "$path/${file.name ?: "folder"}", depth + 1)
-            else if (file.isFile) {
-                val name = file.name ?: "Без названия"
-                val mime = file.type.orEmpty().lowercase(Locale.ROOT)
+    val maxFiles = 20000
+    val blocked = setOf("Android/data", "Android/obb")
+    fun walk(dir: java.io.File, depth: Int) {
+        if (depth > 20 || result.size >= maxFiles) return
+        val relative = dir.relativeToOrNull(root)?.invariantSeparatorsPath.orEmpty()
+        if (blocked.any { relative == it || relative.startsWith("$it/") }) return
+        val children = runCatching { dir.listFiles() }.getOrNull() ?: return
+        children.forEach { file ->
+            if (result.size >= maxFiles) return
+            if (file.isDirectory) walk(file, depth + 1)
+            else if (file.isFile && file.canRead()) {
+                val name = file.name
                 val lower = name.lowercase(Locale.ROOT)
+                val mime = java.net.URLConnection.guessContentTypeFromName(name).orEmpty().lowercase(Locale.ROOT)
                 val kind = when {
-                    lower.endsWith(".gif") || mime == "image/gif" -> FileKind.GIF
-                    mime.startsWith("image/") -> FileKind.PHOTO
-                    mime.startsWith("video/") -> FileKind.VIDEO
-                    mime.startsWith("audio/") -> FileKind.AUDIO
+                    lower.endsWith(".gif") -> FileKind.GIF
+                    mime.startsWith("image/") || lower.matches(Regex(".*\\.(jpg|jpeg|png|webp|heic|bmp)$")) -> FileKind.PHOTO
+                    mime.startsWith("video/") || lower.matches(Regex(".*\\.(mp4|mkv|mov|avi|webm|3gp)$")) -> FileKind.VIDEO
+                    mime.startsWith("audio/") || lower.matches(Regex(".*\\.(mp3|m4a|aac|wav|flac|ogg|opus)$")) -> FileKind.AUDIO
                     else -> FileKind.OTHER
                 }
-                result.add(ScannedFile(file.uri, name, file.length(), file.lastModified() / 1000, kind, path))
+                result.add(ScannedFile(Uri.fromFile(file), name, file.length(), file.lastModified() / 1000, kind, file.parent ?: root.absolutePath))
             }
         }
     }
-    walk(root, root.name ?: "Выбранная папка", 0)
-    // Hash only same-size groups to avoid reading every file twice.
+    walk(root, 0)
     return result.groupBy { it.size }.values.flatMap { sameSize ->
         if (sameSize.size < 2 || sameSize.first().size <= 0) sameSize
-        else sameSize.map { file -> file.copy(sha256 = hashFile(context, file.uri)) }
+        else sameSize.map { file -> file.copy(sha256 = hashFileFromFile(file.uri.path)) }
     }
 }
+
+private fun hashFileFromFile(path: String?): String? = runCatching {
+    if (path == null) return null
+    val digest = java.security.MessageDigest.getInstance("SHA-256")
+    java.io.FileInputStream(path).buffered().use { input ->
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+    }
+    digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+}.getOrNull()
 
 private fun hashFile(context: Context, uri: Uri): String? = runCatching {
     val digest = java.security.MessageDigest.getInstance("SHA-256")
@@ -381,9 +398,29 @@ private fun InfoCard(title: String, description: String) {
     }
 }
 private fun storageStats(): Pair<Long, Long> = runCatching {
-    val stat = StatFs(Environment.getDataDirectory().path)
+    val stat = StatFs(Environment.getExternalStorageDirectory().path)
     stat.totalBytes to stat.availableBytes
 }.getOrDefault(0L to 0L)
+
+private fun hasStorageAccess(context: Context): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+    Environment.isExternalStorageManager()
+} else {
+    context.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED
+}
+
+private fun requestAllFilesAccess(context: Context) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+            data = Uri.parse("package:${context.packageName}")
+        }
+        runCatching { context.startActivity(intent) }.onFailure {
+            context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+        }
+    } else if (context is ComponentActivity) {
+        context.requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE), 702)
+    }
+}
 private fun memoryInfo(context: Context): String = runCatching {
     val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
     val info = ActivityManager.MemoryInfo()
