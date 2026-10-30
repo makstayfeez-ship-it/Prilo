@@ -18,6 +18,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -58,6 +61,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
@@ -78,10 +82,19 @@ import java.util.Calendar
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-private val Background = Color(0xFF0B0F0E)
-private val Panel = Color(0xFF151D1A)
-private val Accent = Color(0xFF35D49A)
-private val Muted = Color(0xFF9AA9A2)
+private val Background = Color(0xFF111719)
+private val Panel = Color(0xFF202B30)
+private val Accent = Color(0xFF99B69E)
+private val Peach = Color(0xFFFFCEAD)
+private val Coral = Color(0xFFFF847C)
+private val Rose = Color(0xFFE84A5F)
+private val Muted = Color(0xFFB2C0BC)
+private val CardGradient = Brush.linearGradient(
+    colors = listOf(Color(0xFF34464A), Color(0xFF26353A), Color(0xFF202B30))
+)
+private val AccentGradient = Brush.linearGradient(
+    colors = listOf(Color(0xFF99B69E), Color(0xFFFFCEAD), Color(0xFFFF847C))
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -91,7 +104,8 @@ class MainActivity : ComponentActivity() {
                 colorScheme = MaterialTheme.colorScheme.copy(
                     primary = Accent, onPrimary = Color(0xFF062016),
                     background = Background, surface = Panel,
-                    onBackground = Color.White, onSurface = Color.White
+                    onBackground = Color(0xFFF4F5F1), onSurface = Color(0xFFF4F5F1),
+                    secondary = Peach, tertiary = Coral
                 )
             ) { OptimizerApp(this) }
         }
@@ -121,23 +135,32 @@ private fun OptimizerApp(context: Context) {
     Scaffold(
         containerColor = Background,
         bottomBar = {
-            NavigationBar(containerColor = Panel) {
+            NavigationBar(containerColor = Color(0xFF182226)) {
                 tabs.forEachIndexed { index, tab ->
-                    NavigationBarItem(selected == index, { selected = index },
+                    NavigationBarItem(
+                        selected == index, { selected = index },
                         icon = { Icon(tab.icon, contentDescription = tab.title) },
-                        label = { Text(tab.title, fontSize = 9.sp) })
+                        label = { Text(tab.title, fontSize = 10.sp) },
+                        colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
+                            selectedIconColor = Color(0xFF182226),
+                            selectedTextColor = Accent,
+                            indicatorColor = Accent,
+                            unselectedIconColor = Muted,
+                            unselectedTextColor = Muted
+                        )
+                    )
                 }
             }
         }
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp),
+            modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF172125), Background, Color(0xFF101517)))).padding(padding).padding(horizontal = 18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {
                 Spacer(Modifier.height(10.dp))
-                Text("PROJECT", color = Muted, fontSize = 12.sp)
-                Text("OPTIMIZER", color = Accent, fontSize = 27.sp)
+                Text("PROJECT", color = Peach, fontSize = 11.sp, letterSpacing = 3.sp)
+                Text("OPTIMIZER", color = Color(0xFFF4F5F1), fontSize = 29.sp, letterSpacing = 1.5.sp)
                 Text("Контроль состояния устройства", color = Muted, fontSize = 13.sp)
             }
             item {
@@ -598,20 +621,42 @@ private fun Settings(context: Context) {
 }
 @Composable
 private fun MetricCard(title: String, value: String, modifier: Modifier = Modifier) {
-    Card(modifier, colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
-        Column(Modifier.padding(16.dp)) {
-            Text(title, color = Muted, fontSize = 12.sp)
-            Spacer(Modifier.height(8.dp))
-            Text(value, color = Accent, fontSize = 20.sp)
+    Card(
+        modifier = modifier.animateContentSize(),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        shape = RoundedCornerShape(22.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(CardGradient, RoundedCornerShape(22.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(22.dp))
+                .padding(18.dp)
+        ) {
+            Text(title, color = Peach, fontSize = 12.sp, letterSpacing = 0.5.sp)
+            Spacer(Modifier.height(9.dp))
+            Text(value, color = Color(0xFFF4F5F1), fontSize = 21.sp)
         }
     }
 }
 @Composable
 private fun InfoCard(title: String, description: String) {
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
-        Column(Modifier.padding(16.dp)) {
-            Text(title, color = Color.White, fontSize = 16.sp)
-            Spacer(Modifier.height(6.dp))
+    Card(
+        Modifier.fillMaxWidth().animateContentSize(),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        shape = RoundedCornerShape(22.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(CardGradient, RoundedCornerShape(22.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(22.dp))
+                .padding(18.dp)
+        ) {
+            Text(title, color = Color(0xFFF4F5F1), fontSize = 16.sp)
+            Spacer(Modifier.height(7.dp))
             Text(description, color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
         }
     }
