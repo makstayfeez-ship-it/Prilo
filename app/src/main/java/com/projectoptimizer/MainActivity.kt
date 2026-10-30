@@ -1210,35 +1210,89 @@ private fun Monitoring(context: Context) {
     val animatedMemory by animateFloatAsState(memoryFraction, tween(850), label = "monitor_memory")
     val thermal = thermalInfo(context)
 
-    Column(verticalArrangement = Arrangement.spacedBy(15.dp)) {
-        ScreenHeading("LIVE DEVICE ANALYTICS", "Мониторинг", "Показатели обновляются, пока открыт этот экран.")
-        MonitorMetricCard(
-            title = "Хранилище",
-            value = stats?.let { formatStorageBytes(context, it.freeBytes) } ?: "Проверка…",
-            subtitle = stats?.let { "Свободно из " + formatStorageBytes(context, it.totalBytes) } ?: "Ожидаем данные Android",
-            fraction = 1f - animatedStorage,
-            tint = Accent,
-            inverse = true
-        )
-        MonitorMetricCard(
-            title = "Оперативная память",
-            value = memory?.let { formatStorageBytes(context, it.first) } ?: "Проверка…",
-            subtitle = memory?.let { "Свободно из " + formatStorageBytes(context, it.second) } ?: "Показатель доступной RAM",
-            fraction = 1f - animatedMemory,
-            tint = Peach
-        )
-        MonitorMetricCard(
-            title = "Аккумулятор",
-            value = battery?.let { "${it.percent}%" } ?: "Нет данных",
-            subtitle = battery?.let {
-                buildString {
-                    append(if (it.charging) "Заряжается" else "Работает от батареи")
-                    it.temperatureC?.let { temp -> append(" · батарея ${String.format(Locale.getDefault(), "%.1f", temp)} °C") }
+    Column(verticalArrangement = Arrangement.spacedBy(17.dp)) {
+        ScreenHeading("DEVICE ANALYTICS / 03", "Мониторинг", "Живые показатели телефона и динамика изменений.")
+
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(29.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF315C64), Color(0xFF213D48), Color(0xFF1A2A33))))
+                .border(1.dp, Color(0xFF8EDCE0).copy(alpha = .20f), RoundedCornerShape(29.dp))
+                .padding(19.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("СИСТЕМНЫЙ ПУЛЬС", color = Color(0xFFB7E7E6), fontSize = 10.sp, letterSpacing = 1.8.sp)
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Box(Modifier.size(6.dp).clip(RoundedCornerShape(50)).background(Accent))
+                    Text("LIVE", color = Accent, fontSize = 9.sp, letterSpacing = 1.sp)
                 }
-            } ?: "Системная информация недоступна",
-            fraction = (battery?.percent ?: 0).coerceIn(0, 100) / 100f,
-            tint = Coral
-        )
+            }
+            Text("Телефон под наблюдением", color = Color.White, fontSize = 22.sp)
+            Text("Собираем системные значения, пока открыт этот экран.", color = Color.White.copy(alpha = .65f), fontSize = 11.sp, lineHeight = 16.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).background(Color.White.copy(alpha = .07f)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("RAM", color = Color(0xFFF1D3A8), fontSize = 9.sp, letterSpacing = 1.sp)
+                    Text(memory?.let { formatStorageBytes(context, it.first) } ?: "—", color = Color.White, fontSize = 17.sp)
+                    Text("доступно", color = Muted, fontSize = 9.sp)
+                }
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).background(Color.White.copy(alpha = .07f)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("BATTERY", color = Color(0xFFFFAFA5), fontSize = 9.sp, letterSpacing = 1.sp)
+                    Text(battery?.let { it.percent.toString() + "%" } ?: "—", color = Color.White, fontSize = 17.sp)
+                    Text(battery?.let { if (it.charging) "заряжается" else "без зарядки" } ?: "нет данных", color = Muted, fontSize = 9.sp)
+                }
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).background(Color.White.copy(alpha = .07f)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("THERMAL", color = Color(0xFFB5E5D1), fontSize = 9.sp, letterSpacing = 1.sp)
+                    Text(thermal, color = Color.White, fontSize = 12.sp, lineHeight = 15.sp)
+                    Text("система", color = Muted, fontSize = 9.sp)
+                }
+            }
+            Text("Обновлений экрана: " + refreshTick + " · интервал 15 сек", color = Color.White.copy(alpha = .48f), fontSize = 9.sp)
+        }
+
+        ScreenSectionLabel("ТЕКУЩИЕ РЕСУРСЫ")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                Modifier.weight(1f).clip(RoundedCornerShape(22.dp)).background(Color(0xFF24363A))
+                    .border(1.dp, Color.White.copy(alpha = .06f), RoundedCornerShape(22.dp)).padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("ХРАНИЛИЩЕ", color = Accent, fontSize = 9.sp, letterSpacing = 1.1.sp)
+                Text(stats?.let { formatStorageBytes(context, it.freeBytes) } ?: "—", color = Color.White, fontSize = 21.sp)
+                Text("свободно из " + (stats?.let { formatStorageBytes(context, it.totalBytes) } ?: "—"), color = Muted, fontSize = 10.sp)
+                Box(Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = .22f))) {
+                    Box(Modifier.fillMaxWidth((1f - animatedStorage).coerceIn(.015f, 1f)).height(7.dp).clip(RoundedCornerShape(20.dp)).background(Brush.horizontalGradient(listOf(Accent, Color(0xFF83D6BE)))))
+                }
+                Text((animatedStorage * 100).toInt().toString() + "% занято", color = Muted, fontSize = 9.sp)
+            }
+            Column(
+                Modifier.weight(1f).clip(RoundedCornerShape(22.dp)).background(Color(0xFF2D3039))
+                    .border(1.dp, Color.White.copy(alpha = .06f), RoundedCornerShape(22.dp)).padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("ОПЕРАТИВНАЯ ПАМЯТЬ", color = Peach, fontSize = 9.sp, letterSpacing = .7.sp)
+                Text(memory?.let { formatStorageBytes(context, it.first) } ?: "—", color = Color.White, fontSize = 21.sp)
+                Text("доступно из " + (memory?.let { formatStorageBytes(context, it.second) } ?: "—"), color = Muted, fontSize = 10.sp)
+                Box(Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = .22f))) {
+                    Box(Modifier.fillMaxWidth((1f - animatedMemory).coerceIn(.015f, 1f)).height(7.dp).clip(RoundedCornerShape(20.dp)).background(Brush.horizontalGradient(listOf(Peach, Coral))))
+                }
+                Text((animatedMemory * 100).toInt().toString() + "% используется", color = Muted, fontSize = 9.sp)
+            }
+        }
+
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Color(0xFF302B31)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("АККУМУЛЯТОР", color = Coral, fontSize = 9.sp, letterSpacing = 1.2.sp)
+                Text(battery?.let { it.percent.toString() + "%" } ?: "—", color = Color.White, fontSize = 18.sp)
+            }
+            Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(30.dp)).background(Color.Black.copy(alpha = .22f))) {
+                Box(Modifier.fillMaxWidth(((battery?.percent ?: 0).coerceIn(0, 100) / 100f).coerceAtLeast(.01f)).height(8.dp).clip(RoundedCornerShape(30.dp)).background(Brush.horizontalGradient(listOf(Coral, Peach))))
+            }
+            Text(battery?.let {
+                (if (it.charging) "Заряжается" else "Работает от батареи") +
+                    (it.temperatureC?.let { temp -> " · " + String.format(Locale.getDefault(), "%.1f", temp) + " °C" } ?: "")
+            } ?: "Системная информация недоступна", color = Muted, fontSize = 11.sp)
+        }
+
         FeatureCard(
             "Тепловое состояние",
             thermal,
@@ -1248,15 +1302,17 @@ private fun Monitoring(context: Context) {
                 else -> Accent
             }
         )
-        ScreenSectionLabel("ИСТОРИЯ ПОКАЗАТЕЛЕЙ")
-        TrendLineChart("Загрузка RAM", ramHistory, Peach)
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                ScreenSectionLabel("ИСТОРИЯ ИЗМЕНЕНИЙ")
+                Text("Динамика системы", color = Color.White, fontSize = 20.sp)
+            }
+            Text("● REC", color = Accent, fontSize = 9.sp, letterSpacing = 1.sp)
+        }
+        TrendLineChart("Использование оперативной памяти", ramHistory, Peach)
         TrendLineChart("Заполнение хранилища", storageHistory, Accent)
-        Text(
-            "Графики собирают точки только пока открыт экран мониторинга. После закрытия приложения сбор останавливается.",
-            color = Muted,
-            fontSize = 10.sp,
-            lineHeight = 15.sp
-        )
+        InfoCard("Как читаются графики", "История собирает точки каждые 15 секунд только пока открыт экран мониторинга. После выхода сбор приостанавливается; значения берутся из Android, а не моделируются.")
     }
 }
 
