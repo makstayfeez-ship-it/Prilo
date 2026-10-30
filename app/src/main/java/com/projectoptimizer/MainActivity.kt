@@ -959,186 +959,193 @@ private fun Games(context: Context) {
         it.label.contains(query, ignoreCase = true) || it.packageName.contains(query, ignoreCase = true)
     }.take(80)
 
-    Column(verticalArrangement = Arrangement.spacedBy(15.dp)) {
-        ScreenHeading("GAME CENTER", "Игровой центр", "Твоя игровая зона: запускай игры и включай фокус перед матчем.")
+    Column(verticalArrangement = Arrangement.spacedBy(17.dp)) {
+        ScreenHeading("GAME CENTER / 02", "Игровой центр", "Игры, быстрый запуск и спокойный режим на время матча.")
+
         Column(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(30.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFF51447A), Color(0xFF302F4C), Color(0xFF1D292F))))
-                .border(1.dp, Color(0xFFB69AFF).copy(alpha = .22f), RoundedCornerShape(30.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF51417B), Color(0xFF302F50), Color(0xFF1D292F))))
+                .border(1.dp, Color(0xFFB69AFF).copy(alpha = .26f), RoundedCornerShape(30.dp))
                 .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(15.dp)
+            verticalArrangement = Arrangement.spacedBy(17.dp)
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("OPTIMIZER / GAME", color = Color(0xFFC7B5FF), fontSize = 10.sp, letterSpacing = 2.sp)
-                    Text("Игровой режим", color = Color.White, fontSize = 25.sp)
+                    Text("OPTIMIZER / PLAY", color = Color(0xFFD2C3FF), fontSize = 10.sp, letterSpacing = 2.sp)
+                    Text("Твоя игровая зона", color = Color.White, fontSize = 23.sp)
                 }
-                Box(Modifier.size(44.dp).clip(RoundedCornerShape(15.dp)).background(Color.White.copy(alpha = .10f)), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                    Icon(Icons.Default.Gamepad, contentDescription = null, tint = Color(0xFFC7B5FF), modifier = Modifier.size(25.dp))
+                Box(Modifier.size(48.dp).clip(RoundedCornerShape(16.dp)).background(Color.White.copy(alpha = .10f)), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    Icon(Icons.Default.Gamepad, contentDescription = "Игры", tint = Color(0xFFD2C3FF), modifier = Modifier.size(27.dp))
                 }
             }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Box(Modifier.size(100.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Box(Modifier.size(108.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
                     Canvas(Modifier.fillMaxSize()) {
-                        drawArc(Color.White.copy(alpha = .12f), -90f, 360f, false, style = Stroke(width = 9.dp.toPx()))
-                        drawArc(Brush.sweepGradient(listOf(Color(0xFF9C76FF), Color(0xFF62D9BD), Color(0xFF9C76FF))), -90f, if (focusActive) 300f else 220f, false, style = Stroke(width = 9.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                        drawArc(Color.White.copy(alpha = .13f), -90f, 360f, false, style = Stroke(width = 10.dp.toPx()))
+                        drawArc(Brush.sweepGradient(listOf(Color(0xFFB69AFF), Color(0xFF70DDC3), Color(0xFFB69AFF))), -90f, if (focusActive) 315f else 235f, false, style = Stroke(width = 10.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
                     }
                     Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                        Text(if (focusActive) "ON" else "READY", color = Color.White, fontSize = 17.sp)
-                        Text("FOCUS", color = Color(0xFFC7B5FF), fontSize = 8.sp, letterSpacing = 1.sp)
+                        Text(if (focusActive) "ON" else "READY", color = Color.White, fontSize = 18.sp)
+                        Text("FOCUS", color = Color(0xFFD2C3FF), fontSize = 8.sp, letterSpacing = 1.sp)
                     }
                 }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Text("Твоя игровая зона", color = Color.White, fontSize = 18.sp)
-                    Text("Быстрый запуск игр и меньше отвлекающих уведомлений во время матча.", color = Color.White.copy(alpha = .68f), fontSize = 12.sp, lineHeight = 18.sp)
-                    Text(chosenGames.size.toString() + " ИГР В БИБЛИОТЕКЕ", color = Color(0xFFB6F0D8), fontSize = 10.sp, letterSpacing = 1.sp)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(if (focusActive) "Фокус активен" else "Готов к запуску", color = Color.White, fontSize = 18.sp)
+                    Text("Библиотека игр и инструменты Android для игровых сессий.", color = Color.White.copy(alpha = .68f), fontSize = 11.sp, lineHeight = 17.sp)
+                    Text(selectedPackages.size.toString() + " В БИБЛИОТЕКЕ", color = Color(0xFFB6F0D8), fontSize = 10.sp, letterSpacing = 1.sp)
                 }
             }
             androidx.compose.material3.Surface(
                 onClick = {
                     val first = chosenGames.firstOrNull()
-                    if (first != null) launchGame(context, first.packageName, focusBeforeLaunch)
-                    else showPicker = true
+                    if (first != null) launchGame(context, first.packageName, focusBeforeLaunch) else showPicker = true
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(17.dp),
                 color = Color(0xFFB69AFF)
             ) {
-                Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Row(Modifier.padding(vertical = 15.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     Icon(Icons.Default.Gamepad, contentDescription = null, tint = Color(0xFF211A36))
                     Spacer(Modifier.width(9.dp))
-                    Text(if (chosenGames.isEmpty()) "ДОБАВИТЬ ПЕРВУЮ ИГРУ" else "ЗАПУСТИТЬ ИГРУ", color = Color(0xFF211A36), fontSize = 12.sp, letterSpacing = 1.sp)
+                    Text(if (chosenGames.isEmpty()) "ДОБАВИТЬ ПЕРВУЮ ИГРУ" else "БЫСТРЫЙ ЗАПУСК", color = Color(0xFF211A36), fontSize = 12.sp, letterSpacing = 1.sp)
                 }
             }
-            Text("Инструменты используют возможности Android и не обещают искусственного прироста FPS.", color = Color.White.copy(alpha = .55f), fontSize = 10.sp, lineHeight = 15.sp)
-        }
-
-        ScreenSectionLabel("ИГРОВОЙ ФОКУС")
-        SettingToggle(
-            "Не беспокоить перед запуском",
-            "Перед запуском выбранной игры включает приоритетный режим Android. Разрешение можно отключить в системных настройках.",
-            focusBeforeLaunch
-        ) { checked ->
-            if (checked && !hasNotificationPolicyAccess(context)) {
-                Toast.makeText(context, "Разреши доступ к режиму «Не беспокоить» в настройках Android.", Toast.LENGTH_LONG).show()
-                runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
-            } else {
-                focusBeforeLaunch = checked
-                prefs.edit().putBoolean("game_focus_before_launch", checked).apply()
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                GameStatPill("Библиотека · " + chosenGames.size)
+                GameStatPill("Установлено · " + installedApps.size)
+                GameStatPill(if (hasDndAccess) "Фокус доступен" else "Нужен доступ")
             }
         }
-        if (!hasDndAccess && focusBeforeLaunch) {
-            PrimaryActionButton(
-                "Настроить режим «Не беспокоить»",
-                onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) } },
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-        if (focusActive) {
-            Column(
-                Modifier.fillMaxWidth().background(Color(0xFF293A36), RoundedCornerShape(18.dp)).padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text("Игровой фокус включён", color = Accent, fontSize = 14.sp)
-                Text("Когда закончишь играть, верни предыдущий режим уведомлений.", color = Muted, fontSize = 11.sp)
-                PrimaryActionButton(
-                    "Вернуть обычный режим",
-                    onClick = {
-                        if (setGameFocus(context, false)) {
-                            focusActive = false
-                            Toast.makeText(context, "Обычный режим уведомлений восстановлен.", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(context, "Не удалось восстановить режим. Проверь доступ Android.", Toast.LENGTH_LONG).show()
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
+
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+                .background(Color(0xFF202B35)).border(1.dp, Color(0xFFB69AFF).copy(alpha = .13f), RoundedCornerShape(24.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(11.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("ИГРОВОЙ ФОКУС", color = Color(0xFFD2C3FF), fontSize = 10.sp, letterSpacing = 1.5.sp)
+                    Text("Меньше отвлечений", color = Color.White, fontSize = 17.sp)
+                }
+                Text(if (focusBeforeLaunch) "ON" else "OFF", color = if (focusBeforeLaunch) Accent else Muted, fontSize = 11.sp)
+            }
+            Text("Перед запуском игры Android может включить режим «Не беспокоить». Разрешение и фильтр уведомлений контролируются системой.", color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
+            SettingToggle(
+                "Включать перед запуском",
+                "Сохраняет настройку и использует системный режим при запуске выбранной игры.",
+                focusBeforeLaunch
+            ) { checked ->
+                if (checked && !hasNotificationPolicyAccess(context)) {
+                    Toast.makeText(context, "Разреши доступ к режиму «Не беспокоить» в настройках Android.", Toast.LENGTH_LONG).show()
+                    runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
+                } else {
+                    focusBeforeLaunch = checked
+                    prefs.edit().putBoolean("game_focus_before_launch", checked).apply()
+                }
+            }
+            if (!hasDndAccess && focusBeforeLaunch) {
+                PrimaryActionButton("Выдать системное разрешение", onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) } }, modifier = Modifier.fillMaxWidth())
+            }
+            if (focusActive) {
+                Column(Modifier.fillMaxWidth().background(Color(0xFF263D39), RoundedCornerShape(17.dp)).padding(13.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Игровой фокус сейчас включён", color = Accent, fontSize = 13.sp)
+                    Text("После завершения игры верни предыдущий режим уведомлений.", color = Muted, fontSize = 11.sp)
+                    PrimaryActionButton(
+                        "Восстановить обычный режим",
+                        onClick = {
+                            if (setGameFocus(context, false)) {
+                                focusActive = false
+                                Toast.makeText(context, "Обычный режим уведомлений восстановлен.", Toast.LENGTH_SHORT).show()
+                            } else Toast.makeText(context, "Не удалось восстановить режим. Проверь доступ Android.", Toast.LENGTH_LONG).show()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            ScreenSectionLabel("МОИ ИГРЫ")
-            Text(
-                "+ ДОБАВИТЬ",
-                color = Accent,
-                fontSize = 11.sp,
-                letterSpacing = 0.7.sp,
-                modifier = Modifier.clickable { showPicker = !showPicker; query = "" }.padding(6.dp)
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                ScreenSectionLabel("ТВОЯ КОЛЛЕКЦИЯ")
+                Text("Мои игры", color = Color.White, fontSize = 20.sp)
+            }
+            androidx.compose.material3.Surface(
+                onClick = { showPicker = !showPicker; query = "" },
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xFF3C3159)
+            ) { Text(if (showPicker) "ЗАКРЫТЬ" else "+ ДОБАВИТЬ", Modifier.padding(horizontal = 13.dp, vertical = 11.dp), color = Color(0xFFD2C3FF), fontSize = 10.sp, letterSpacing = .8.sp) }
         }
         if (chosenGames.isEmpty()) {
-            InfoCard(
-                "Добавь первую игру",
-                "Нажми «Добавить» и выбери установленную игру. После этого её можно будет запускать прямо отсюда."
-            )
+            Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(22.dp)).padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("🎮", fontSize = 28.sp)
+                Text("Здесь пока тихо", color = Color.White, fontSize = 17.sp)
+                Text("Добавь установленные игры — появятся быстрые кнопки запуска и отдельная библиотека.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                PrimaryActionButton("Выбрать игры", onClick = { showPicker = true; query = "" }, modifier = Modifier.fillMaxWidth())
+            }
         } else {
-            chosenGames.forEach { app ->
-                GameAppRow(
-                    app = app,
-                    isAdded = true,
-                    onAdd = {},
-                    onRemove = {
-                        selectedPackages = selectedPackages - app.packageName
-                        prefs.edit().putStringSet("game_packages", selectedPackages).apply()
-                    },
-                    onLaunch = { launchGame(context, app.packageName, focusBeforeLaunch) }
-                )
+            chosenGames.forEachIndexed { index, app ->
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color(0xFF202B35))
+                        .border(1.dp, Color.White.copy(alpha = .055f), RoundedCornerShape(20.dp))
+                        .padding(13.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(11.dp)
+                ) {
+                    Box(Modifier.size(48.dp).clip(RoundedCornerShape(15.dp)).background(Brush.linearGradient(listOf(Color(0xFF9B79E8), Color(0xFF54C5AF)))), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        Text(app.label.take(1).uppercase(Locale.ROOT), color = Color(0xFF1D2030), fontSize = 20.sp)
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(app.label, color = Color.White, fontSize = 14.sp, maxLines = 1)
+                        Text(if (app.isGameCategory) "ИГРА · " + (index + 1).toString().padStart(2, '0') else "ПРИЛОЖЕНИЕ · " + (index + 1).toString().padStart(2, '0'), color = Muted, fontSize = 9.sp, letterSpacing = .8.sp)
+                    }
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("ИГРАТЬ", color = Color(0xFFCDBEFF), fontSize = 10.sp, modifier = Modifier.clickable { launchGame(context, app.packageName, focusBeforeLaunch) }.padding(4.dp))
+                        Text("УБРАТЬ", color = Coral, fontSize = 9.sp, modifier = Modifier.clickable { selectedPackages = selectedPackages - app.packageName; prefs.edit().putStringSet("game_packages", selectedPackages).apply() }.padding(4.dp))
+                    }
+                }
             }
         }
 
         if (showPicker) {
-            Column(
-                Modifier.fillMaxWidth().background(Color(0xFF182327), RoundedCornerShape(22.dp))
-                    .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(22.dp)).padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text("Выбери приложения", color = Color.White, fontSize = 16.sp)
+            Column(Modifier.fillMaxWidth().background(Color(0xFF1A252C), RoundedCornerShape(23.dp)).border(1.dp, Color(0xFFB69AFF).copy(alpha = .18f), RoundedCornerShape(23.dp)).padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("ДОБАВИТЬ В БИБЛИОТЕКУ", color = Color(0xFFD2C3FF), fontSize = 10.sp, letterSpacing = 1.4.sp)
+                Text("Выбери приложение", color = Color.White, fontSize = 18.sp)
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    placeholder = { Text("Поиск игры или приложения", color = Muted) },
+                    placeholder = { Text("Поиск по названию", color = Muted) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = Accent,
-                        unfocusedBorderColor = Muted.copy(alpha = 0.3f),
-                        cursorColor = Accent
+                        focusedBorderColor = Color(0xFFB69AFF),
+                        unfocusedBorderColor = Muted.copy(alpha = .3f),
+                        cursorColor = Color(0xFFB69AFF)
                     )
                 )
-                if (filteredApps.isEmpty()) {
-                    Text("Подходящие приложения не найдены.", color = Muted, fontSize = 12.sp)
-                } else {
-                    filteredApps.forEach { app ->
-                        GameAppRow(
-                            app = app,
-                            isAdded = app.packageName in selectedPackages,
-                            onAdd = {
-                                selectedPackages = selectedPackages + app.packageName
-                                prefs.edit().putStringSet("game_packages", selectedPackages).apply()
-                            }
-                        )
-                    }
+                if (filteredApps.isEmpty()) Text("Ничего не найдено.", color = Muted, fontSize = 12.sp)
+                else filteredApps.forEach { app ->
+                    GameAppRow(
+                        app = app,
+                        isAdded = app.packageName in selectedPackages,
+                        onAdd = {
+                            selectedPackages = selectedPackages + app.packageName
+                            prefs.edit().putStringSet("game_packages", selectedPackages).apply()
+                        }
+                    )
                 }
-                Text(
-                    "Показываются приложения с ярлыком запуска, доступные Android для этого приложения.",
-                    color = Muted,
-                    fontSize = 10.sp,
-                    lineHeight = 15.sp
-                )
+                Text("Список включает приложения с доступным ярлыком запуска Android.", color = Muted, fontSize = 10.sp, lineHeight = 15.sp)
             }
         }
 
-        ScreenSectionLabel("СОСТОЯНИЕ УСТРОЙСТВА")
+        ScreenSectionLabel("ПЕРЕД МАТЧЕМ")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            MetricCard("Свободная RAM", memoryInfo(context), Modifier.weight(1f))
-            MetricCard("Нагрев", thermalInfo(context), Modifier.weight(1f))
+            MetricCard("Доступная RAM", memoryInfo(context), Modifier.weight(1f))
+            MetricCard("Температура", thermalInfo(context), Modifier.weight(1f))
         }
-        InfoCard(
-            "Что реально делает бустер",
-            "Game Center запускает выбранные приложения и по твоему разрешению включает приоритетный режим уведомлений. Он не разгоняет процессор, не очищает память другой игры и не рисует выдуманный FPS."
-        )
+        InfoCard("Честный игровой режим", "Game Center помогает запускать игры и по твоему разрешению включает системный режим уведомлений. Android сам управляет производительностью; приложение не подделывает FPS и не обещает разгон процессора.")
     }
 }
 
