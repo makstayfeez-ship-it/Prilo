@@ -252,7 +252,7 @@ private fun Cleaning(context: Context) {
             ) { Text("Очистить кэш приложений через Android") }
             InfoCard("Очистка кэша", "Android покажет системное подтверждение. Кэш очищается средствами системы, закрытые данные приложений не затрагиваются.")
         } else {
-            Button(onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_STORAGE_SETTINGS)) } },
+            Button(onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_SETTINGS)) } },
                 modifier = Modifier.fillMaxWidth()) { Text("Открыть управление хранилищем") }
         }
         InfoCard("Результат анализа", status)
