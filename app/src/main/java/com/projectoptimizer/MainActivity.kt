@@ -492,12 +492,13 @@ private fun clearOwnAppCache(context: Context): Long {
     }
 }
 
-// Показываем именно внутреннее пользовательское хранилище телефона.
- // StatFs.availableBytes учитывает место, доступное обычным приложениям,
- // в отличие от getFreeBytes(), который может включать зарезервированные блоки.
+// Читаем ёмкость основного общего хранилища телефона — того же тома,
+ // который Android показывает в разделе «Хранилище» и где лежат DCIM,
+ // Downloads, Pictures и другие пользовательские файлы.
+ // StatFs возвращает реальные значения файловой системы, не оценку.
 private fun storageStats(context: Context): Pair<Long, Long> = runCatching {
-    val dataPath = Environment.getDataDirectory().absolutePath
-    val stat = StatFs(dataPath)
+    val primaryStorage = Environment.getExternalStorageDirectory()
+    val stat = StatFs(primaryStorage.absolutePath)
     val total = stat.totalBytes.coerceAtLeast(0L)
     val free = stat.availableBytes.coerceIn(0L, total)
     total to free
