@@ -63,11 +63,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.work.Constraints
+import androidx.work.CoroutineWorker
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 private val Background = Color(0xFF0B0F0E)
 private val Panel = Color(0xFF151D1A)
@@ -471,9 +478,95 @@ private fun Monitoring(context: Context) {
 }
 @Composable
 private fun Settings(context: Context) {
-    InfoCard("Настройки", "Настройки безопасной очистки сохраняются на устройстве.")
-    InfoCard("Автоматическая очистка", "Расписание добавим следующим этапом. Сначала проверим, что анализ папок и защита файлов работают корректно; автоматическое удаление без проверки включать опасно.")
-    InfoCard("Конфиденциальность", "Данные анализа остаются на телефоне и не отправляются на сервер.")
+    val prefs = remember { context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE) }
+    var enabled by remember { mutableStateOf(prefs.getBoolean("auto_clean_enabled", false)) }
+    var cleanAppCache by remember { mutableStateOf(prefs.getBoolean("auto_clean_app_cache", true)) }
+    var cleanTempFiles by remember { mutableStateOf(prefs.getBoolean("auto_clean_temp_files", true)) }
+    var intervalDays by remember { mutableIntStateOf(prefs.getInt("auto_clean_interval_days", 1).coerceIn(1, 7)) }
+    var refreshToken by remember { mutableIntStateOf(0) }
+
+    DisposableEffect(context) {
+        val lifecycle = (context as? ComponentActivity)?.lifecycle
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                enabled = prefs.getBoolean("auto_clean_enabled", false)
+                cleanAppCache = prefs.getBoolean("auto_clean_app_cache", true)
+                cleanTempFiles = prefs.getBoolean("auto_clean_temp_files", true)
+                intervalDays = prefs.getInt("auto_clean_interval_days", 1).coerceIn(1, 7)
+                refreshToken++
+            }
+        }
+        lifecycle?.addObserver(observer)
+        onDispose { lifecycle?.removeObserver(observer) }
+    }
+
+    val lastRun = remember(refreshToken) { prefs.getLong("auto_clean_last_run", 0L) }
+    val lastFreed = remember(refreshToken) { prefs.getLong("auto_clean_last_freed_estimate", 0L) }
+    val hasAccess = hasStorageAccess(context)
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        InfoCard("Автоматическая очистка", "Включи расписание — Project Optimizer будет сам удалять безопасные временные файлы по выбранному графику.")
+        SettingToggle(
+            "Включить автоочистку",
+            "Очистка запускается в фоне, когда Android разрешит фоновую работу.",
+            enabled
+        ) { checked ->
+            enabled = checked
+            prefs.edit().putBoolean("auto_clean_enabled", checked).apply()
+            if (checked && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context, intervalDays)
+            else cancelAutoClean(context)
+        }
+
+        Text("Как часто запускать", color = Color.White, fontSize = 14.sp)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(1, 3, 7).forEach { days ->
+                Button(
+                    onClick = {
+                        intervalDays = days
+                        prefs.edit().putInt("auto_clean_interval_days", days).apply()
+                        if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context, days)
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(when (days) { 1 -> "Каждый день"; 3 -> "3 дня"; else -> "7 дней" }, fontSize = 11.sp)
+                }
+            }
+        }
+
+        Text("Что очищать", color = Color.White, fontSize = 14.sp)
+        SettingToggle("Кэш Project Optimizer", "Удаляет временные файлы самого оптимизатора.", cleanAppCache) { checked ->
+            cleanAppCache = checked
+            prefs.edit().putBoolean("auto_clean_app_cache", checked).apply()
+            if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context, intervalDays)
+            else if (enabled) cancelAutoClean(context)
+        }
+        SettingToggle(
+            "Временные и мусорные файлы",
+            "Удаляет старые .tmp, .temp, .part и файлы из папок temp/tmp/cache старше 14 дней.",
+            cleanTempFiles
+        ) { checked ->
+            cleanTempFiles = checked
+            prefs.edit().putBoolean("auto_clean_temp_files", checked).apply()
+            if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context, intervalDays)
+            else if (enabled) cancelAutoClean(context)
+        }
+
+        InfoCard(
+            "Последняя очистка",
+            if (lastRun > 0L) {
+                "Выполнена: ${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(lastRun))}\n" +
+                    "Оценочно удалено: ${formatStorageBytes(context, lastFreed)}"
+            } else "Автоматическая очистка ещё не запускалась."
+        )
+        if (!hasAccess && enabled && cleanTempFiles) {
+            InfoCard("Нужно разрешение", "Для временных файлов общего хранилища выдай приложению доступ ко всем файлам во вкладке «Очистка». Кэш самого Project Optimizer можно очищать и без него.")
+        }
+        InfoCard(
+            "Важное ограничение Android",
+            "Android не разрешает сторонним приложениям незаметно удалять закрытый кэш других приложений. Автоочистка убирает кэш самого Project Optimizer и безопасные временные файлы общего хранилища. Фото, видео, музыка, документы и данные мессенджеров не трогаются."
+        )
+        InfoCard("Конфиденциальность", "Настройки и расписание хранятся на телефоне. Список личных файлов никуда не отправляется.")
+    }
 }
 @Composable
 private fun MetricCard(title: String, value: String, modifier: Modifier = Modifier) {
@@ -494,6 +587,116 @@ private fun InfoCard(title: String, description: String) {
             Text(description, color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
         }
     }
+}
+
+
+private const val AUTO_CLEAN_WORK_NAME = "project_optimizer_auto_clean"
+
+private fun scheduleAutoClean(context: Context, intervalDays: Int) {
+    val constraints = Constraints.Builder()
+        .setRequiresBatteryNotLow(true)
+        .build()
+    val request = PeriodicWorkRequestBuilder<AutoCleanWorker>(
+        intervalDays.coerceIn(1, 7).toLong(), TimeUnit.DAYS
+    ).setConstraints(constraints).build()
+
+    WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+        AUTO_CLEAN_WORK_NAME,
+        ExistingPeriodicWorkPolicy.UPDATE,
+        request
+    )
+}
+
+private fun cancelAutoClean(context: Context) {
+    WorkManager.getInstance(context).cancelUniqueWork(AUTO_CLEAN_WORK_NAME)
+}
+
+class AutoCleanWorker(
+    appContext: Context,
+    params: WorkerParameters
+) : CoroutineWorker(appContext, params) {
+    override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        val prefs = applicationContext.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE)
+        if (!prefs.getBoolean("auto_clean_enabled", false)) return@withContext Result.success()
+
+        var estimatedRemoved = 0L
+        if (prefs.getBoolean("auto_clean_app_cache", true)) {
+            estimatedRemoved += clearOwnAppCache(applicationContext)
+        }
+        if (prefs.getBoolean("auto_clean_temp_files", true) && hasStorageAccess(applicationContext)) {
+            val ageDays = prefs.getInt("auto_clean_temp_age_days", 14).coerceIn(7, 90)
+            estimatedRemoved += cleanSafeTemporaryFiles(
+                Environment.getExternalStorageDirectory(),
+                ageDays
+            )
+        }
+
+        prefs.edit()
+            .putLong("auto_clean_last_run", System.currentTimeMillis())
+            .putLong("auto_clean_last_freed_estimate", estimatedRemoved)
+            .apply()
+        Result.success()
+    }
+}
+
+/**
+ * Only old temporary artifacts and explicitly named temporary/cache folders
+ * are eligible. Personal media, documents, messenger data and backups are excluded.
+ */
+private fun cleanSafeTemporaryFiles(root: java.io.File, ageDays: Int): Long {
+    val rootPath = runCatching { root.canonicalPath }.getOrNull() ?: return 0L
+    val cutoff = System.currentTimeMillis() - ageDays.coerceIn(7, 90).toLong() * 86_400_000L
+    val safeTempFolders = setOf("temp", "tmp", ".temp", ".tmp", ".cache", "cache", "caches", ".thumbnails", "thumbnails")
+    val protectedFolders = setOf(
+        "android", "dcim", "pictures", "movies", "music", "documents",
+        "whatsapp", "telegram", "signal", "viber", "messenger",
+        "backups", "backup", "recordings", "podcasts", "audiobooks"
+    )
+    val tempExtensions = setOf(".tmp", ".temp", ".part", ".crdownload", ".download", ".cache")
+    val visited = HashSet<String>()
+    var removedBytes = 0L
+    var visitedFiles = 0
+
+    fun walk(dir: java.io.File, depth: Int) {
+        if (depth > 7 || visitedFiles >= 20_000) return
+        val canonical = runCatching { dir.canonicalPath }.getOrNull() ?: return
+        if (!canonical.startsWith(rootPath + java.io.File.separator) && canonical != rootPath) return
+        if (!visited.add(canonical)) return
+
+        val relative = canonical.removePrefix(rootPath).trim('/')
+        val segments = relative.split('/').filter { it.isNotBlank() }
+        if (segments.any { it.lowercase(Locale.ROOT) in protectedFolders }) return
+
+        val children = runCatching { dir.listFiles() }.getOrNull() ?: return
+        children.forEach { file ->
+            if (visitedFiles >= 20_000) return
+            if (file.isDirectory) {
+                walk(file, depth + 1)
+            } else if (file.isFile) {
+                visitedFiles++
+                val modified = file.lastModified()
+                if (modified <= 0L || modified >= cutoff) return@forEach
+
+                val parentPath = file.parentFile?.let {
+                    runCatching { it.canonicalPath.removePrefix(rootPath).trim('/') }.getOrDefault("")
+                }.orEmpty()
+                val inKnownTempFolder = parentPath.split('/').any {
+                    it.lowercase(Locale.ROOT) in safeTempFolders
+                }
+                val hasTempExtension = tempExtensions.any {
+                    file.name.lowercase(Locale.ROOT).endsWith(it)
+                }
+
+                if (inKnownTempFolder || hasTempExtension) {
+                    val size = file.length()
+                    if (runCatching { file.delete() }.getOrDefault(false)) removedBytes += size
+                }
+            }
+        }
+    }
+
+    walk(root, 0)
+    return removedBytes
 }
 
 private fun isCacheCandidate(parentPath: String, fileName: String): Boolean {
