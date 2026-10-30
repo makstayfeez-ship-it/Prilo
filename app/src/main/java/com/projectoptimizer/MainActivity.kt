@@ -957,7 +957,6 @@ private fun Settings(context: Context) {
                     "Оценочно удалено: " + formatStorageBytes(context, lastFreed)
             } else "Автоматическая очистка ещё не запускалась."
         )
-undefined
     }
 }
 @Composable
