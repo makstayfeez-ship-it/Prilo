@@ -19,9 +19,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,6 +35,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Gamepad
@@ -180,19 +184,104 @@ private fun OptimizerApp(context: Context) {
 @Composable
 private fun Dashboard(context: Context) {
     val storage = rememberStorageStats(context)
-    InfoCard(
-        "Хранилище телефона",
-        storage?.let {
-            "Занято: ${formatStorageBytes(context, it.usedBytes)} из ${formatStorageBytes(context, it.totalBytes)}\n" +
-                "Свободно: ${formatStorageBytes(context, it.freeBytes)}\nИсточник: ${it.source}"
-        } ?: "Получаю данные основного хранилища Android…"
+    val usedFraction = (storage?.let { it.usedBytes.toFloat() / it.totalBytes.coerceAtLeast(1L).toFloat() } ?: 0f).coerceIn(0f, 1f)
+    val animatedUsage by animateFloatAsState(
+        targetValue = usedFraction,
+        animationSpec = tween(durationMillis = 950),
+        label = "storage_usage"
     )
-    MetricCard("Свободно", storage?.let { formatStorageBytes(context, it.freeBytes) } ?: "Проверка…", Modifier.fillMaxWidth())
-    MetricCard("Свободная RAM", memoryInfo(context), Modifier.fillMaxWidth())
-    MetricCard("Тепловое состояние", thermalInfo(context), Modifier.fillMaxWidth())
-    InfoCard("Доступ к файлам", if (hasStorageAccess(context)) "Доступ к общему хранилищу предоставлен." else "Открой «Очистка» и выдай разрешение «Доступ ко всем файлам».")
+    val freeLabel = storage?.let { formatStorageBytes(context, it.freeBytes) } ?: "Проверка…"
+    val totalLabel = storage?.let { formatStorageBytes(context, it.totalBytes) } ?: "Получаю данные…"
+    val usedLabel = storage?.let { formatStorageBytes(context, it.usedBytes) } ?: "—"
+
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("ТВОЁ УСТРОЙСТВО", color = Peach, fontSize = 10.sp, letterSpacing = 2.sp)
+                Text("Всё под контролем", color = Color(0xFFF4F5F1), fontSize = 21.sp)
+            }
+            Text("● ONLINE", color = Accent, fontSize = 10.sp, letterSpacing = 1.sp)
+        }
+        StorageHeroCard(
+            free = freeLabel,
+            total = totalLabel,
+            used = usedLabel,
+            progress = animatedUsage,
+            source = storage?.source ?: "Считываем хранилище Android"
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            MetricCard("Оперативная память", memoryInfo(context), Modifier.weight(1f))
+            MetricCard("Нагрев устройства", thermalInfo(context), Modifier.weight(1f))
+        }
+        val storageAdvice = when {
+            storage == null -> "Пока не удалось получить данные хранилища. Попробуй обновить экран позже."
+            usedFraction >= 0.9f -> "Свободного места мало. Рекомендуем проверить крупные и временные файлы."
+            usedFraction >= 0.75f -> "Хранилище постепенно заполняется. Можно проверить, что занимает больше всего места."
+            else -> "С хранилищем всё в порядке. Продолжай пользоваться телефоном — мы поможем следить за состоянием."
+        }
+        InfoCard("Подсказка Optimizer", storageAdvice)
+        InfoCard(
+            "Доступ к файлам",
+            if (hasStorageAccess(context)) "Доступ к общему хранилищу предоставлен."
+            else "Открой «Очистка» и выдай разрешение «Доступ ко всем файлам»."
+        )
+    }
 }
 
+@Composable
+private fun StorageHeroCard(
+    free: String,
+    total: String,
+    used: String,
+    progress: Float,
+    source: String
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.linearGradient(
+                    listOf(Color(0xFF526E68), Color(0xFF354B4D), Color(0xFF26353A))
+                ),
+                RoundedCornerShape(28.dp)
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.13f), RoundedCornerShape(28.dp))
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(13.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("ХРАНИЛИЩЕ", color = Peach, fontSize = 11.sp, letterSpacing = 2.sp)
+            Text("●", color = Accent, fontSize = 15.sp)
+        }
+        Text(free, color = Color(0xFFF8F5EF), fontSize = 35.sp)
+        Text("свободно из $total", color = Color.White.copy(alpha = 0.78f), fontSize = 13.sp)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(11.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color.Black.copy(alpha = 0.22f))
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(progress.coerceIn(0.015f, 1f))
+                    .height(11.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(AccentGradient)
+            )
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("ЗАНЯТО", color = Color.White.copy(alpha = 0.65f), fontSize = 9.sp, letterSpacing = 1.sp)
+                Text(used, color = Color.White, fontSize = 14.sp)
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("ИСТОЧНИК", color = Color.White.copy(alpha = 0.65f), fontSize = 9.sp, letterSpacing = 1.sp)
+                Text(source, color = Color.White, fontSize = 10.sp)
+            }
+        }
+    }
+}
 @Composable
 private fun Cleaning(context: Context) {
     val prefs = remember { context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE) }
