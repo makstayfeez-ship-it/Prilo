@@ -1424,129 +1424,131 @@ private fun Settings(context: Context) {
 
     val lastRun = remember(refreshToken) { prefs.getLong("auto_clean_last_run", 0L) }
     val lastFreed = remember(refreshToken) { prefs.getLong("auto_clean_last_freed_estimate", 0L) }
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        ScreenHeading("PERSONAL CONTROL", "Настройки", "Подстрой приложение под свой телефон — остальное оно сделает само.")
-        InfoCard(
-            "Автопилот устройства",
-            "Включи расписание, чтобы ProjectOptimizer сам запускал безопасную очистку доступных временных файлов."
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !hasAccess) {
-            PrimaryActionButton("Выдать разрешение Android", onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth())
-            InfoCard(
-                "Нужно системное разрешение",
-                "Android откроет собственный экран специального доступа. Включи «Разрешить доступ к управлению всеми файлами» и вернись сюда."
-            )
-        } else {
-            FeatureCard("Доступ к файлам", "Разрешение предоставлено. Доступны только те файлы и каталоги, которые разрешает Android.", Accent)
-        }
+    Column(verticalArrangement = Arrangement.spacedBy(17.dp)) {
+        ScreenHeading("CONTROL CENTER / 04", "Настройки", "Настрой автоматический уход и поведение приложения.")
 
-        SettingToggle(
-            "Включить автоочистку",
-            "Запуск в фоне по выбранному расписанию. Android может немного сдвигать время.",
-            enabled
-        ) { checked ->
-            enabled = checked
-            prefs.edit().putBoolean("auto_clean_enabled", checked).apply()
-            if (checked && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
-            else cancelAutoClean(context)
-        }
-
-        if (enabled) {
-            ScreenSectionLabel("ИНТЕРВАЛ АВТООЧИСТКИ")
-            Text(
-                "Повторять: " + when (intervalMinutes) {
-                    30 -> "каждые 30 минут"
-                    60 -> "каждый час"
-                    120 -> "каждые 2 часа"
-                    360 -> "каждые 6 часов"
-                    720 -> "каждые 12 часов"
-                    1440 -> "раз в сутки"
-                    4320 -> "раз в 3 дня"
-                    10080 -> "раз в 7 дней"
-                    else -> "каждые $intervalMinutes минут"
-                },
-                color = Color.White,
-                fontSize = 17.sp
-            )
-            val intervalOptions = listOf(
-                30 to "30 мин", 60 to "1 час", 120 to "2 часа", 360 to "6 часов",
-                720 to "12 часов", 1440 to "24 часа", 4320 to "3 дня", 10080 to "7 дней"
-            )
-            intervalOptions.chunked(4).forEach { group ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    group.forEach { (minutes, label) ->
-                        val selected = intervalMinutes == minutes
-                        androidx.compose.material3.Surface(
-                            onClick = {
-                                intervalMinutes = minutes
-                                prefs.edit().putInt("auto_clean_interval_minutes", minutes).apply()
-                                if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
-                            },
-                            modifier = Modifier.weight(1f),
-                            color = if (selected) Accent.copy(alpha = 0.18f) else Panel,
-                            shape = RoundedCornerShape(15.dp),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (selected) Accent else Color.White.copy(alpha = 0.07f)
-                            )
-                        ) {
-                            Text(
-                                label,
-                                Modifier.padding(vertical = 13.dp, horizontal = 3.dp),
-                                color = if (selected) Accent else Color.White,
-                                fontSize = 11.sp,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                        }
-                    }
-                    repeat(4 - group.size) { Spacer(Modifier.weight(1f)) }
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(29.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF485F50), Color(0xFF2B413D), Color(0xFF1D2D32))))
+                .border(1.dp, Color(0xFFB3D6B7).copy(alpha = .20f), RoundedCornerShape(29.dp))
+                .padding(19.dp),
+            verticalArrangement = Arrangement.spacedBy(13.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("OPTIMIZER / CONTROL", color = Color(0xFFCBE8C9), fontSize = 10.sp, letterSpacing = 1.8.sp)
+                Box(Modifier.clip(RoundedCornerShape(30.dp)).background(if (enabled) Accent.copy(alpha = .18f) else Color.White.copy(alpha = .08f)).padding(horizontal = 10.dp, vertical = 6.dp)) {
+                    Text(if (enabled) "АВТОПИЛОТ ON" else "АВТОПИЛОТ OFF", color = if (enabled) Accent else Muted, fontSize = 9.sp, letterSpacing = .8.sp)
                 }
             }
-            InfoCard(
-                "Как работает интервал",
-                "После включения очистка будет запускаться с выбранной периодичностью. Android может задержать фоновую задачу из-за энергосбережения или нагрузки."
-            )
-
-            ScreenSectionLabel("ЧТО ОЧИЩАТЬ")
-            SettingToggle("Кэш Project Optimizer", "Временные файлы самого оптимизатора.", cleanAppCache) { checked ->
-                cleanAppCache = checked
-                prefs.edit().putBoolean("auto_clean_app_cache", checked).apply()
-                if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
-                else if (enabled) cancelAutoClean(context)
+            Text("Твой телефон.\nТвои правила.", color = Color.White, fontSize = 25.sp, lineHeight = 29.sp)
+            Text("Безопасная автоочистка работает по расписанию, а ты выбираешь, что именно можно удалять.", color = Color.White.copy(alpha = .68f), fontSize = 12.sp, lineHeight = 18.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(17.dp)).background(Color.White.copy(alpha = .07f)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("ИНТЕРВАЛ", color = Color(0xFFCBE8C9), fontSize = 9.sp, letterSpacing = 1.sp)
+                    Text(if (enabled) when (intervalMinutes) { 30 -> "30 мин"; 60 -> "1 час"; 120 -> "2 часа"; 360 -> "6 часов"; 720 -> "12 часов"; 1440 -> "1 день"; 4320 -> "3 дня"; 10080 -> "7 дней"; else -> intervalMinutes.toString() + " мин" } else "Выключен", color = Color.White, fontSize = 16.sp)
+                }
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(17.dp)).background(Color.White.copy(alpha = .07f)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("ПОСЛЕДНИЙ ЗАПУСК", color = Color(0xFFCBE8C9), fontSize = 9.sp, letterSpacing = .8.sp)
+                    Text(if (lastRun > 0L) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(lastRun)) else "Пока нет", color = Color.White, fontSize = 12.sp, maxLines = 2)
+                }
             }
+        }
+
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(23.dp)).background(Panel).padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            ScreenSectionLabel("РАЗРЕШЕНИЯ")
+            Text("Связь с Android", color = Color.White, fontSize = 17.sp)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !hasAccess) {
+                FeatureCard("Доступ к файлам не выдан", "Для поиска временных файлов Android требует специальное разрешение.", Coral)
+                PrimaryActionButton("Открыть системные разрешения", onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth())
+            } else {
+                FeatureCard("Доступ к файлам активен", "Приложение видит только те общие файлы и каталоги, которые разрешает Android.", Accent)
+            }
+        }
+
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(23.dp)).background(Color(0xFF202D32)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ScreenSectionLabel("АВТОПИЛОТ")
+            Text("Автоматический уход", color = Color.White, fontSize = 18.sp)
+            Text("Планировщик очищает только разрешённые временные файлы и кэш самого Project Optimizer. Android может немного сдвигать время запуска.", color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
             SettingToggle(
-                "Временные и мусорные файлы",
-                "Старые .tmp, .temp, .part и файлы из папок temp/tmp/cache старше 14 дней.",
-                cleanTempFiles
+                "Включить автоочистку",
+                "Работа в фоне по выбранному расписанию.",
+                enabled
             ) { checked ->
-                cleanTempFiles = checked
-                prefs.edit().putBoolean("auto_clean_temp_files", checked).apply()
-                if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
-                else if (enabled) cancelAutoClean(context)
+                enabled = checked
+                prefs.edit().putBoolean("auto_clean_enabled", checked).apply()
+                if (checked && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context) else cancelAutoClean(context)
             }
-            if (!cleanAppCache && !cleanTempFiles) {
-                InfoCard("Нечего очищать", "Включи хотя бы один тип очистки, чтобы расписание могло работать.")
+            if (enabled) {
+                ScreenSectionLabel("ЧАСТОТА ЗАПУСКА")
+                Text("Повторять: " + when (intervalMinutes) {
+                    30 -> "каждые 30 минут"; 60 -> "каждый час"; 120 -> "каждые 2 часа"; 360 -> "каждые 6 часов"
+                    720 -> "каждые 12 часов"; 1440 -> "раз в сутки"; 4320 -> "раз в 3 дня"; 10080 -> "раз в 7 дней"
+                    else -> "каждые " + intervalMinutes + " минут"
+                }, color = Color.White, fontSize = 16.sp)
+                val intervalOptions = listOf(
+                    30 to "30 мин", 60 to "1 час", 120 to "2 часа", 360 to "6 часов",
+                    720 to "12 часов", 1440 to "24 часа", 4320 to "3 дня", 10080 to "7 дней"
+                )
+                intervalOptions.chunked(4).forEach { group ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        group.forEach { (minutes, label) ->
+                            val selected = intervalMinutes == minutes
+                            androidx.compose.material3.Surface(
+                                onClick = {
+                                    intervalMinutes = minutes
+                                    prefs.edit().putInt("auto_clean_interval_minutes", minutes).apply()
+                                    if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
+                                },
+                                modifier = Modifier.weight(1f),
+                                color = if (selected) Accent.copy(alpha = .18f) else Color(0xFF2B3A3F),
+                                shape = RoundedCornerShape(14.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) Accent else Color.White.copy(alpha = .07f))
+                            ) {
+                                Text(label, Modifier.padding(vertical = 13.dp, horizontal = 3.dp), color = if (selected) Accent else Color.White, fontSize = 10.sp, textAlign = TextAlign.Center)
+                            }
+                        }
+                        repeat(4 - group.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+                ScreenSectionLabel("ЧТО МОЖНО ОЧИЩАТЬ")
+                SettingToggle("Кэш Project Optimizer", "Временные файлы самого оптимизатора.", cleanAppCache) { checked ->
+                    cleanAppCache = checked
+                    prefs.edit().putBoolean("auto_clean_app_cache", checked).apply()
+                    if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context) else if (enabled) cancelAutoClean(context)
+                }
+                SettingToggle("Временные и мусорные файлы", "Старые .tmp, .temp, .part и известные temp/tmp/cache папки старше 14 дней.", cleanTempFiles) { checked ->
+                    cleanTempFiles = checked
+                    prefs.edit().putBoolean("auto_clean_temp_files", checked).apply()
+                    if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context) else if (enabled) cancelAutoClean(context)
+                }
+                if (!cleanAppCache && !cleanTempFiles) FeatureCard("Очистка не настроена", "Включи хотя бы один тип файлов, чтобы расписание выполняло полезную работу.", Coral)
             }
         }
 
-        ScreenSectionLabel("ОСНОВНЫЕ НАСТРОЙКИ")
-        SettingToggle(
-            "Подсказки на главной",
-            "Показывать карточки с советами по уходу за телефоном.",
-            showTips
-        ) { checked ->
-            showTips = checked
-            prefs.edit().putBoolean("show_optimizer_tips", checked).apply()
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(23.dp)).background(Color(0xFF242D35)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            ScreenSectionLabel("ПЕРСОНАЛИЗАЦИЯ")
+            Text("Как ведёт себя приложение", color = Color.White, fontSize = 17.sp)
+            SettingToggle(
+                "Подсказки на главной",
+                "Показывать карточки с короткими советами по уходу за телефоном.",
+                showTips
+            ) { checked ->
+                showTips = checked
+                prefs.edit().putBoolean("show_optimizer_tips", checked).apply()
+            }
         }
 
-        ScreenSectionLabel("ИСТОРИЯ ОЧИСТКИ")
-        InfoCard(
-            "Последняя очистка",
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(23.dp)).background(Color(0xFF1E2B30)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ScreenSectionLabel("ЖУРНАЛ ОБСЛУЖИВАНИЯ")
+            Text("История очистки", color = Color.White, fontSize = 18.sp)
             if (lastRun > 0L) {
-                "Выполнена: " + java.text.DateFormat.getDateTimeInstance().format(java.util.Date(lastRun)) + "\n" +
-                    "Оценочно удалено: " + formatStorageBytes(context, lastFreed)
-            } else "Автоматическая очистка ещё не запускалась."
-        )
+                Text(java.text.DateFormat.getDateTimeInstance().format(java.util.Date(lastRun)), color = Accent, fontSize = 13.sp)
+                Text("Оценочно освобождено: " + formatStorageBytes(context, lastFreed), color = Color.White, fontSize = 13.sp)
+            } else {
+                Text("Автоматическая очистка ещё не запускалась.", color = Muted, fontSize = 12.sp)
+            }
+        }
+        InfoCard("Никаких скрытых обещаний", "Приложение не управляет закрытыми системными процессами и не удаляет личные данные автоматически. Все правила очистки можно изменить здесь.")
     }
 }
 @Composable
