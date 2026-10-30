@@ -17,6 +17,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
@@ -141,90 +149,78 @@ private fun OptimizerApp(context: Context) {
         TabItem("Настройки", Icons.Default.Settings)
     )
     var selected by remember { mutableIntStateOf(0) }
+    var assistantOpen by remember { mutableStateOf(false) }
+    var assistantDismissed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(12000)
+        if (!assistantDismissed) assistantOpen = true
+    }
+    val assistantTitle = when (selected) {
+        0 -> "Начнём с состояния телефона?"
+        1 -> "Небольшой совет по очистке"
+        2 -> "Подготовим телефон к игре"
+        3 -> "Разберём показатели"
+        else -> "Нужна помощь с настройками?"
+    }
+    val assistantText = when (selected) {
+        0 -> "Я помогу понять, что происходит с памятью и хранилищем. Если всё в норме — ничего лишнего делать не нужно."
+        1 -> "Сначала сканируй файлы, посмотри список и отмечай только ненужное. Личные фото и видео не выбираются автоматически."
+        2 -> "Перед игрой проверь нагрев и закрой тяжёлые загрузки. Android сам управляет памятью — агрессивно закрывать все приложения не нужно."
+        3 -> "Свободная RAM меняется постоянно. Важнее смотреть на общую картину и не допускать сильного перегрева."
+        else -> "Настрой автоочистку с безопасным интервалом. Android может немного задерживать фоновые задачи ради экономии батареи."
+    }
     MaterialTheme(
-        colorScheme = MaterialTheme.colorScheme,
+        colorScheme = MaterialTheme.colorScheme.copy(
+            primary = Accent, onPrimary = Color(0xFF10221D),
+            background = Background, surface = Panel,
+            onBackground = Color(0xFFF4F5F1), onSurface = Color(0xFFF4F5F1),
+            secondary = Peach, tertiary = Coral
+        ),
         shapes = androidx.compose.material3.Shapes(
             small = RoundedCornerShape(14.dp),
-            medium = RoundedCornerShape(18.dp),
-            large = RoundedCornerShape(24.dp),
-            extraLarge = RoundedCornerShape(28.dp)
+            medium = RoundedCornerShape(20.dp),
+            large = RoundedCornerShape(26.dp),
+            extraLarge = RoundedCornerShape(32.dp)
         )
     ) {
         Scaffold(
             containerColor = Background,
             bottomBar = {
                 NavigationBar(
-                    containerColor = Color(0xFF182226),
+                    containerColor = Color(0xFF101A1E),
                     tonalElevation = 0.dp
                 ) {
                     tabs.forEachIndexed { index, tab ->
                         NavigationBarItem(
                             selected = selected == index,
-                            onClick = { selected = index },
+                            onClick = { selected = index; assistantOpen = false },
                             icon = { Icon(tab.icon, contentDescription = tab.title) },
-                            label = { Text(tab.title, fontSize = 10.sp) },
+                            label = { Text(tab.title, fontSize = 10.sp, maxLines = 1) },
                             colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
-                                selectedIconColor = Color(0xFF182226),
+                                selectedIconColor = Color(0xFF14221D),
                                 selectedTextColor = Accent,
                                 indicatorColor = Accent,
-                                unselectedIconColor = Muted,
-                                unselectedTextColor = Muted
+                                unselectedIconColor = Muted.copy(alpha = 0.72f),
+                                unselectedTextColor = Muted.copy(alpha = 0.72f)
                             )
                         )
                     }
                 }
             }
         ) { padding ->
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color(0xFF172125), Background, Color(0xFF101517))
-                        )
-                    )
+            Box(
+                Modifier.fillMaxSize()
+                    .background(Brush.verticalGradient(listOf(Color(0xFF182529), Background, Color(0xFF0D1316))))
                     .padding(padding)
-                    .padding(horizontal = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(15.dp)
             ) {
-                item {
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("PROJECT", color = Peach, fontSize = 10.sp, letterSpacing = 3.sp)
-                            Text(
-                                "OPTIMIZER",
-                                color = Color(0xFFF4F5F1),
-                                fontSize = 27.sp,
-                                letterSpacing = 1.6.sp
-                            )
-                            Text(
-                                "Умная забота о твоём устройстве",
-                                color = Muted,
-                                fontSize = 12.sp
-                            )
-                        }
-                        Box(
-                            Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(17.dp))
-                                .background(Brush.linearGradient(listOf(Accent, Peach, Coral))),
-                            contentAlignment = androidx.compose.ui.Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.MonitorHeart,
-                                contentDescription = "Optimizer",
-                                tint = Color(0xFF1C292C),
-                                modifier = Modifier.size(25.dp)
-                            )
-                        }
-                    }
-                }
-                item {
-                    AnimatedContent(targetState = selected, label = "optimizer_screen") { page ->
+                Column(
+                    Modifier.fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 18.dp)
+                        .padding(top = 18.dp, bottom = 92.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    AnimatedContent(targetState = selected, label = "premium_screen_transition") { page ->
                         when (page) {
                             0 -> Dashboard(context)
                             1 -> Cleaning(context)
@@ -234,11 +230,46 @@ private fun OptimizerApp(context: Context) {
                         }
                     }
                 }
-                item { Spacer(Modifier.height(14.dp)) }
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = assistantOpen,
+                    modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd).padding(end = 14.dp, bottom = 12.dp),
+                    enter = fadeIn(tween(260)),
+                    exit = fadeOut(tween(180))
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth(0.88f)
+                            .background(Brush.linearGradient(listOf(Color(0xFF405B54), Color(0xFF26383C))), RoundedCornerShape(24.dp))
+                            .border(1.dp, Accent.copy(alpha = 0.35f), RoundedCornerShape(24.dp))
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("OPTIMIZER · ПОМОЩНИК", color = Accent, fontSize = 10.sp, letterSpacing = 1.5.sp)
+                            Text("×", color = Color.White, fontSize = 22.sp,
+                                modifier = Modifier.clickable { assistantOpen = false; assistantDismissed = true })
+                        }
+                        Text(assistantTitle, color = Color.White, fontSize = 17.sp)
+                        Text(assistantText, color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                        Text("ПОНЯТНО", color = Accent, fontSize = 11.sp, letterSpacing = 1.2.sp,
+                            modifier = Modifier.align(androidx.compose.ui.Alignment.End).clickable { assistantOpen = false })
+                    }
+                }
+                androidx.compose.material3.Surface(
+                    onClick = { assistantOpen = !assistantOpen },
+                    modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd).padding(end = 18.dp, bottom = 14.dp).size(54.dp),
+                    shape = RoundedCornerShape(19.dp),
+                    color = Accent,
+                    shadowElevation = 10.dp
+                ) {
+                    Box(contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        Text("✦", color = Color(0xFF14221D), fontSize = 27.sp)
+                    }
+                }
             }
         }
     }
 }
+
 @Composable
 private fun Dashboard(context: Context) {
     val storage = rememberStorageStats(context)
@@ -961,10 +992,16 @@ private fun Settings(context: Context) {
 }
 @Composable
 private fun ScreenHeading(eyebrow: String, title: String, subtitle: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(eyebrow, color = Peach, fontSize = 10.sp, letterSpacing = 2.sp)
-        Text(title, color = Color(0xFFF4F5F1), fontSize = 24.sp)
-        Text(subtitle, color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+    Column(
+        Modifier.fillMaxWidth().padding(bottom = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp)
+    ) {
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.size(7.dp).clip(RoundedCornerShape(50)).background(Accent))
+            Text(eyebrow, color = Peach, fontSize = 10.sp, letterSpacing = 2.2.sp)
+        }
+        Text(title, color = Color(0xFFF4F5F1), fontSize = 30.sp, letterSpacing = (-0.5).sp)
+        Text(subtitle, color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
     }
 }
 
