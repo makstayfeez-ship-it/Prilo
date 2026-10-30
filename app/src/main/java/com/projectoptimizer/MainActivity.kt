@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -146,9 +147,15 @@ private fun OptimizerApp(context: Context) {
 
 @Composable
 private fun Dashboard(context: Context) {
-    val storage = storageStats(context)
-    InfoCard("Хранилище телефона", "Занято: ${formatBytes(storage.first - storage.second)} из ${formatBytes(storage.first)}")
-    MetricCard("Свободно", formatBytes(storage.second), Modifier.fillMaxWidth())
+    val storage = rememberStorageStats(context)
+    InfoCard(
+        "Хранилище телефона",
+        storage?.let {
+            "Занято: ${formatBytes(it.usedBytes)} из ${formatBytes(it.totalBytes)}\n" +
+                "Свободно: ${formatBytes(it.freeBytes)}\nИсточник: ${it.source}"
+        } ?: "Получаю данные основного хранилища Android…"
+    )
+    MetricCard("Свободно", storage?.let { formatBytes(it.freeBytes) } ?: "Проверка…", Modifier.fillMaxWidth())
     MetricCard("Свободная RAM", memoryInfo(context), Modifier.fillMaxWidth())
     MetricCard("Тепловое состояние", thermalInfo(context), Modifier.fillMaxWidth())
     InfoCard("Доступ к файлам", if (hasStorageAccess(context)) "Доступ к общему хранилищу предоставлен." else "Открой «Очистка» и выдай разрешение «Доступ ко всем файлам».")
@@ -193,10 +200,22 @@ private fun Cleaning(context: Context) {
         }
     }
     val cacheLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        val freeNow = storageStats(context).second
-        val gained = if (cacheFreeBefore >= 0) (freeNow - cacheFreeBefore).coerceAtLeast(0) else 0L
-        status = if (gained > 0) "После системного запроса свободного места стало больше на ${formatBytes(gained)}." else "Android вернул управление, но прирост свободного места не обнаружен. Система могла не выполнить очистку."
-        cacheFreeBefore = -1L
+        val freeBefore = cacheFreeBefore
+        scope.launch {
+            val freshStats = withContext(Dispatchers.IO) { readStorageStats(context) }
+            val gained = if (freeBefore >= 0 && freshStats != null) {
+                (freshStats.freeBytes - freeBefore).coerceAtLeast(0L)
+            } else null
+            status = when {
+                gained != null && gained > 0L ->
+                    "После системного запроса свободного места стало больше на ${formatBytes(gained)}."
+                freshStats == null ->
+                    "Android вернул управление, но не удалось повторно прочитать память."
+                else ->
+                    "Android вернул управление, но прирост свободного места не обнаружен. Система могла не выполнить очистку."
+            }
+            cacheFreeBefore = -1L
+        }
     }
     val protected = setOf(FileKind.PHOTO, FileKind.VIDEO, FileKind.AUDIO)
     val duplicates = remember(files) { files.filter { it.sha256 != null && it.size > 0 }.groupBy { it.sha256 }.values.filter { it.size > 1 }.flatMap { it.drop(1) }.map { it.uri }.toSet() }
@@ -234,8 +253,13 @@ private fun Cleaning(context: Context) {
         dismissButton = { TextButton(onClick = { showDialog = false }) { Text("Отмена") } }
     )
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        val stats = storageStats(context)
-        InfoCard("Память телефона", "Всего: ${formatBytes(stats.first)}\nЗанято: ${formatBytes((stats.first - stats.second).coerceAtLeast(0))}\nСвободно: ${formatBytes(stats.second)}")
+        val stats = rememberStorageStats(context)
+        InfoCard(
+            "Память телефона",
+            stats?.let {
+                "Всего: ${formatBytes(it.totalBytes)}\nЗанято: ${formatBytes(it.usedBytes)}\nСвободно: ${formatBytes(it.freeBytes)}\nИсточник: ${it.source}"
+            } ?: "Получаю системные данные хранилища…"
+        )
         if (!hasAccess) {
             Button(onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth()) { Text("Разрешить доступ ко всем файлам") }
             InfoCard("Доступ Android", "Включи специальное разрешение в системных настройках и вернись в приложение.")
@@ -264,7 +288,7 @@ private fun Cleaning(context: Context) {
         if (scanning || deleting) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(if (scanning) "Поиск файлов · найдено: $foundCount" else "Удаление выбранных файлов…", color = Accent) }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Button(enabled = !scanning && !deleting, onClick = {
-                cacheFreeBefore = storageStats(context).second
+                cacheFreeBefore = stats?.freeBytes ?: -1L
                 val ownCacheBytes = clearOwnAppCache(context)
                 status = "Кэш Project Optimizer очищен: ${formatBytes(ownCacheBytes)}. Запрашиваю системную очистку других приложений…"
                 runCatching { cacheLauncher.launch(Intent(StorageManager.ACTION_CLEAR_APP_CACHE)) }.onFailure {
@@ -438,8 +462,11 @@ private fun Games() {
 @Composable
 private fun Monitoring(context: Context) {
     MetricCard("Свободная оперативная память", memoryInfo(context), Modifier.fillMaxWidth())
-    val stats = storageStats(context)
-    MetricCard("Свободное хранилище", formatBytes(stats.second), Modifier.fillMaxWidth())
+    val stats = rememberStorageStats(context)
+    MetricCard("Свободное хранилище", stats?.let { formatBytes(it.freeBytes) } ?: "Проверка…", Modifier.fillMaxWidth())
+    if (stats != null) {
+        InfoCard("Сведения о накопителе", "Всего: ${formatBytes(stats.totalBytes)}\nЗанято: ${formatBytes(stats.usedBytes)}\nИсточник: ${stats.source}")
+    }
     MetricCard("Тепловое состояние", thermalInfo(context), Modifier.fillMaxWidth())
 }
 @Composable
@@ -492,21 +519,112 @@ private fun clearOwnAppCache(context: Context): Long {
     }
 }
 
-// Читаем ёмкость основного общего хранилища телефона — того же тома,
- // который Android показывает в разделе «Хранилище» и где лежат DCIM,
- // Downloads, Pictures и другие пользовательские файлы.
- // StatFs возвращает реальные значения файловой системы, не оценку.
-// Android StorageStatsManager предназначен для отображения пользователю
-// общей ёмкости физического носителя и свободного места, включая кэш,
-// который система может освободить. UUID определяем по внутреннему data-разделу.
-private fun storageStats(context: Context): Pair<Long, Long> = runCatching {
-    val storageManager = context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
-    val statsManager = context.getSystemService(Context.STORAGE_STATS_SERVICE) as StorageStatsManager
-    val storageUuid = storageManager.getUuidForPath(Environment.getDataDirectory())
-    val total = statsManager.getTotalBytes(storageUuid).coerceAtLeast(0L)
-    val free = statsManager.getFreeBytes(storageUuid).coerceIn(0L, total)
-    total to free
-}.getOrElse { 0L to 0L }
+private data class StorageSnapshot(
+    val totalBytes: Long,
+    val freeBytes: Long,
+    val source: String
+) {
+    val usedBytes: Long
+        get() = (totalBytes - freeBytes).coerceAtLeast(0L)
+}
+
+/**
+ * Reads storage for display, not for file-write decisions.
+ *
+ * Priority:
+ * 1) Android's documented default UUID (primary user-visible storage).
+ * 2) UUID resolved from the primary shared-storage path.
+ * 3) UUID resolved from /data as a compatibility fallback.
+ * 4) StatFs on the primary shared-storage mount.
+ * 5) StatFs on /data as the last fallback.
+ *
+ * Every candidate keeps total/free values from the same volume. We never
+ * combine the capacity of one partition with free space from another.
+ */
+private fun readStorageStats(context: Context): StorageSnapshot? {
+    val storageManager = runCatching {
+        context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
+    }.getOrNull()
+    val statsManager = runCatching {
+        context.getSystemService(Context.STORAGE_STATS_SERVICE) as StorageStatsManager
+    }.getOrNull()
+
+    val primaryPath = Environment.getExternalStorageDirectory()
+    val dataPath = Environment.getDataDirectory()
+
+    if (statsManager != null) {
+        val uuids = linkedSetOf(StorageManager.UUID_DEFAULT)
+
+        if (storageManager != null) {
+            runCatching { uuids.add(storageManager.getUuidForPath(primaryPath)) }
+            runCatching { uuids.add(storageManager.getUuidForPath(dataPath)) }
+        }
+
+        uuids.forEachIndexed { index, uuid ->
+            val candidate = runCatching {
+                val total = statsManager.getTotalBytes(uuid)
+                val free = statsManager.getFreeBytes(uuid)
+                if (total > 0L && free >= 0L && free <= total) {
+                    val source = when {
+                        uuid == StorageManager.UUID_DEFAULT -> "Android · основной том"
+                        index == 1 -> "Android · общее хранилище"
+                        else -> "Android · резервный том"
+                    }
+                    StorageSnapshot(total, free, source)
+                } else null
+            }.getOrNull()
+
+            if (candidate != null) return candidate
+        }
+    }
+
+    fun statFsSnapshot(path: java.io.File, source: String): StorageSnapshot? =
+        runCatching {
+            val stat = StatFs(path.absolutePath)
+            val total = stat.totalBytes
+            val free = stat.availableBytes
+            if (total > 0L && free >= 0L && free <= total) {
+                StorageSnapshot(total, free, source)
+            } else null
+        }.getOrNull()
+
+    return statFsSnapshot(primaryPath, "StatFs · общее хранилище")
+        ?: statFsSnapshot(dataPath, "StatFs · резервный раздел")
+}
+
+/**
+ * StorageStatsManager calls can take seconds. Load them off the UI thread
+ * and refresh whenever the app returns to the foreground.
+ */
+@Composable
+private fun rememberStorageStats(context: Context): StorageSnapshot? {
+    val state = remember(context) { mutableStateOf<StorageSnapshot?>(null) }
+    val scope = rememberCoroutineScope()
+
+    DisposableEffect(context) {
+        var refreshJob: Job? = null
+        val refresh: () -> Unit = {
+            refreshJob?.cancel()
+            refreshJob = scope.launch {
+                state.value = withContext(Dispatchers.IO) { readStorageStats(context) }
+            }
+        }
+
+        refresh()
+        val lifecycle = (context as? ComponentActivity)?.lifecycle
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refresh()
+        }
+        lifecycle?.addObserver(observer)
+
+        onDispose {
+            refreshJob?.cancel()
+            lifecycle?.removeObserver(observer)
+        }
+    }
+
+    return state.value
+}
 
 private fun hasStorageAccess(context: Context): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
     Environment.isExternalStorageManager()
