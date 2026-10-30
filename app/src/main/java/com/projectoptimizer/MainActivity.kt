@@ -484,6 +484,7 @@ private fun Settings(context: Context) {
     var cleanTempFiles by remember { mutableStateOf(prefs.getBoolean("auto_clean_temp_files", true)) }
     var intervalDays by remember { mutableIntStateOf(prefs.getInt("auto_clean_interval_days", 1).coerceIn(1, 7)) }
     var refreshToken by remember { mutableIntStateOf(0) }
+    var hasAccess by remember { mutableStateOf(hasStorageAccess(context)) }
 
     DisposableEffect(context) {
         val lifecycle = (context as? ComponentActivity)?.lifecycle
@@ -493,6 +494,7 @@ private fun Settings(context: Context) {
                 cleanAppCache = prefs.getBoolean("auto_clean_app_cache", true)
                 cleanTempFiles = prefs.getBoolean("auto_clean_temp_files", true)
                 intervalDays = prefs.getInt("auto_clean_interval_days", 1).coerceIn(1, 7)
+                hasAccess = hasStorageAccess(context)
                 refreshToken++
             }
         }
@@ -502,10 +504,20 @@ private fun Settings(context: Context) {
 
     val lastRun = remember(refreshToken) { prefs.getLong("auto_clean_last_run", 0L) }
     val lastFreed = remember(refreshToken) { prefs.getLong("auto_clean_last_freed_estimate", 0L) }
-    val hasAccess = hasStorageAccess(context)
-
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        InfoCard("Автоматическая очистка", "Включи расписание — Project Optimizer будет сам удалять безопасные временные файлы по выбранному графику.")
+        InfoCard("Автоматическая очистка", "Выдай разрешение Android один раз — и оптимизатор сможет по расписанию удалять доступные временные файлы общего хранилища и свой кэш.")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !hasAccess) {
+            Button(onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth()) {
+                Text("Выдать разрешение Android · все файлы")
+            }
+            InfoCard(
+                "Нужно системное разрешение",
+                "Android откроет собственный экран специального доступа. Включи «Разрешить доступ к управлению всеми файлами» для Project Optimizer и вернись сюда — статус обновится автоматически."
+            )
+        } else {
+            InfoCard("Доступ к файлам", "Разрешение предоставлено. Оптимизатор может очищать доступные временные файлы общего хранилища.")
+        }
+
         SettingToggle(
             "Включить автоочистку",
             "Очистка запускается в фоне, когда Android разрешит фоновую работу.",
@@ -558,12 +570,9 @@ private fun Settings(context: Context) {
                     "Оценочно удалено: ${formatStorageBytes(context, lastFreed)}"
             } else "Автоматическая очистка ещё не запускалась."
         )
-        if (!hasAccess && enabled && cleanTempFiles) {
-            InfoCard("Нужно разрешение", "Для временных файлов общего хранилища выдай приложению доступ ко всем файлам во вкладке «Очистка». Кэш самого Project Optimizer можно очищать и без него.")
-        }
         InfoCard(
-            "Важное ограничение Android",
-            "Android не разрешает сторонним приложениям незаметно удалять закрытый кэш других приложений. Автоочистка убирает кэш самого Project Optimizer и безопасные временные файлы общего хранилища. Фото, видео, музыка, документы и данные мессенджеров не трогаются."
+            "Что Android всё равно закрывает",
+            "Даже с этим разрешением Android 11+ не открывает сторонним приложениям приватные каталоги других приложений и часть Android/data и Android/obb. Их закрытый кэш нельзя безопасно обойти обычным приложением без root или системных привилегий. Фото, видео, музыка, документы, мессенджеры и резервные копии защищены от автоудаления."
         )
         InfoCard("Конфиденциальность", "Настройки и расписание хранятся на телефоне. Список личных файлов никуда не отправляется.")
     }
