@@ -1,6 +1,7 @@
 package com.projectoptimizer
 
 import android.app.ActivityManager
+import android.app.TimePickerDialog
 import android.app.usage.StorageStatsManager
 import android.content.Intent
 import android.provider.Settings
@@ -65,14 +66,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Calendar
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
@@ -483,6 +485,8 @@ private fun Settings(context: Context) {
     var cleanAppCache by remember { mutableStateOf(prefs.getBoolean("auto_clean_app_cache", true)) }
     var cleanTempFiles by remember { mutableStateOf(prefs.getBoolean("auto_clean_temp_files", true)) }
     var intervalDays by remember { mutableIntStateOf(prefs.getInt("auto_clean_interval_days", 1).coerceIn(1, 7)) }
+    var cleanHour by remember { mutableIntStateOf(prefs.getInt("auto_clean_hour", 3).coerceIn(0, 23)) }
+    var cleanMinute by remember { mutableIntStateOf(prefs.getInt("auto_clean_minute", 0).coerceIn(0, 59)) }
     var refreshToken by remember { mutableIntStateOf(0) }
     var hasAccess by remember { mutableStateOf(hasStorageAccess(context)) }
 
@@ -494,6 +498,8 @@ private fun Settings(context: Context) {
                 cleanAppCache = prefs.getBoolean("auto_clean_app_cache", true)
                 cleanTempFiles = prefs.getBoolean("auto_clean_temp_files", true)
                 intervalDays = prefs.getInt("auto_clean_interval_days", 1).coerceIn(1, 7)
+                cleanHour = prefs.getInt("auto_clean_hour", 3).coerceIn(0, 23)
+                cleanMinute = prefs.getInt("auto_clean_minute", 0).coerceIn(0, 59)
                 hasAccess = hasStorageAccess(context)
                 refreshToken++
             }
@@ -525,10 +531,23 @@ private fun Settings(context: Context) {
         ) { checked ->
             enabled = checked
             prefs.edit().putBoolean("auto_clean_enabled", checked).apply()
-            if (checked && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context, intervalDays)
+            if (checked && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
             else cancelAutoClean(context)
         }
 
+        if (enabled) {
+            Text("Время автоочистки", color = Color.White, fontSize = 14.sp)
+            Button(onClick = {
+                TimePickerDialog(context, { _, hour, minute ->
+                    cleanHour = hour
+                    cleanMinute = minute
+                    prefs.edit().putInt("auto_clean_hour", hour).putInt("auto_clean_minute", minute).apply()
+                    if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
+                }, cleanHour, cleanMinute, true).show()
+            }, modifier = Modifier.fillMaxWidth()) {
+                Text("Выбрать время · %02d:%02d".format(cleanHour, cleanMinute))
+            }
+        }
         Text("Как часто запускать", color = Color.White, fontSize = 14.sp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(1, 3, 7).forEach { days ->
@@ -536,7 +555,7 @@ private fun Settings(context: Context) {
                     onClick = {
                         intervalDays = days
                         prefs.edit().putInt("auto_clean_interval_days", days).apply()
-                        if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context, days)
+                        if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
                     },
                     modifier = Modifier.weight(1f)
                 ) {
@@ -549,7 +568,7 @@ private fun Settings(context: Context) {
         SettingToggle("Кэш Project Optimizer", "Удаляет временные файлы самого оптимизатора.", cleanAppCache) { checked ->
             cleanAppCache = checked
             prefs.edit().putBoolean("auto_clean_app_cache", checked).apply()
-            if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context, intervalDays)
+            if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
             else if (enabled) cancelAutoClean(context)
         }
         SettingToggle(
@@ -559,7 +578,7 @@ private fun Settings(context: Context) {
         ) { checked ->
             cleanTempFiles = checked
             prefs.edit().putBoolean("auto_clean_temp_files", checked).apply()
-            if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context, intervalDays)
+            if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
             else if (enabled) cancelAutoClean(context)
         }
 
@@ -601,18 +620,27 @@ private fun InfoCard(title: String, description: String) {
 
 private const val AUTO_CLEAN_WORK_NAME = "project_optimizer_auto_clean"
 
-private fun scheduleAutoClean(context: Context, intervalDays: Int) {
-    val constraints = Constraints.Builder()
-        .setRequiresBatteryNotLow(true)
+private fun scheduleAutoClean(context: Context) {
+    val prefs = context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE)
+    val intervalDays = prefs.getInt("auto_clean_interval_days", 1).coerceIn(1, 7)
+    val hour = prefs.getInt("auto_clean_hour", 3).coerceIn(0, 23)
+    val minute = prefs.getInt("auto_clean_minute", 0).coerceIn(0, 59)
+    val now = Calendar.getInstance()
+    val next = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, hour)
+        set(Calendar.MINUTE, minute)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+        while (timeInMillis <= now.timeInMillis) add(Calendar.DAY_OF_YEAR, intervalDays)
+    }
+    val delay = (next.timeInMillis - now.timeInMillis).coerceAtLeast(1L)
+    val constraints = Constraints.Builder().setRequiresBatteryNotLow(true).build()
+    val request = OneTimeWorkRequestBuilder<AutoCleanWorker>()
+        .setInitialDelay(delay, TimeUnit.MILLISECONDS)
+        .setConstraints(constraints)
         .build()
-    val request = PeriodicWorkRequestBuilder<AutoCleanWorker>(
-        intervalDays.coerceIn(1, 7).toLong(), TimeUnit.DAYS
-    ).setConstraints(constraints).build()
-
-    WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-        AUTO_CLEAN_WORK_NAME,
-        ExistingPeriodicWorkPolicy.UPDATE,
-        request
+    WorkManager.getInstance(context).enqueueUniqueWork(
+        AUTO_CLEAN_WORK_NAME, ExistingWorkPolicy.REPLACE, request
     )
 }
 
@@ -644,6 +672,10 @@ class AutoCleanWorker(
             .putLong("auto_clean_last_run", System.currentTimeMillis())
             .putLong("auto_clean_last_freed_estimate", estimatedRemoved)
             .apply()
+        if (prefs.getBoolean("auto_clean_enabled", false) &&
+            (prefs.getBoolean("auto_clean_app_cache", true) || prefs.getBoolean("auto_clean_temp_files", true))) {
+            scheduleAutoClean(applicationContext)
+        }
         Result.success()
     }
 }
