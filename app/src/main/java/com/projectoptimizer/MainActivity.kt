@@ -1,6 +1,7 @@
 package com.projectoptimizer
 
 import android.app.ActivityManager
+import android.app.usage.StorageStatsManager
 import android.content.Intent
 import android.provider.Settings
 import android.content.Context
@@ -10,6 +11,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.PowerManager
 import android.os.StatFs
+import android.os.storage.StorageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -85,7 +87,7 @@ class MainActivity : ComponentActivity() {
 
 private data class TabItem(val title: String, val icon: ImageVector)
 private enum class FileKind(val title: String) {
-    PHOTO("Фото"), VIDEO("Видео"), AUDIO("Аудио"), GIF("GIF"), OTHER("Другие файлы")
+    PHOTO("Фото"), VIDEO("Видео"), AUDIO("Аудио"), GIF("GIF"), ARCHIVE("Архивы"), OTHER("Другие файлы")
 }
 private data class ScannedFile(
     val uri: Uri, val name: String, val size: Long, val modified: Long,
@@ -140,7 +142,7 @@ private fun OptimizerApp(context: Context) {
 
 @Composable
 private fun Dashboard(context: Context) {
-    val storage = storageStats()
+    val storage = storageStats(context)
     InfoCard("Хранилище телефона", "Занято: ${formatBytes(storage.first - storage.second)} из ${formatBytes(storage.first)}")
     MetricCard("Свободно", formatBytes(storage.second), Modifier.fillMaxWidth())
     MetricCard("Свободная RAM", memoryInfo(context), Modifier.fillMaxWidth())
@@ -168,9 +170,15 @@ private fun Cleaning(context: Context) {
     var allowGif by remember { mutableStateOf(prefs.getBoolean("allow_gif", true)) }
     var allowDuplicates by remember { mutableStateOf(prefs.getBoolean("allow_duplicates", true)) }
     var allowOld by remember { mutableStateOf(prefs.getBoolean("allow_old", false)) }
+    var allowArchives by remember { mutableStateOf(prefs.getBoolean("allow_archives", false)) }
     var lockedUris by remember { mutableStateOf(prefs.getStringSet("locked_uris", emptySet())?.toSet() ?: emptySet()) }
-    var oldDays by remember { mutableIntStateOf(prefs.getInt("old_days", 180)) }
+    var oldDays by remember { mutableIntStateOf(prefs.getInt("old_days", 180).coerceIn(7, 730)) }
     val scope = rememberCoroutineScope()
+    val cacheClearLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        status = if (result.resultCode == android.app.Activity.RESULT_OK)
+            "Системная очистка кэша завершена."
+        else "Системная очистка кэша отменена или не выполнена."
+    }
     val protectedKinds = setOf(FileKind.PHOTO, FileKind.VIDEO, FileKind.AUDIO)
     val duplicateUris = remember(files) {
         files.filter { it.size > 0 && it.sha256 != null }.groupBy { it.sha256 }.values
@@ -180,6 +188,7 @@ private fun Cleaning(context: Context) {
     val candidates = files.filter { file ->
         file.kind !in protectedKinds && file.uri.toString() !in lockedUris && (
             (allowGif && file.kind == FileKind.GIF) ||
+            (allowArchives && file.kind == FileKind.ARCHIVE) ||
             (allowDuplicates && file.uri in duplicateUris) ||
             (allowOld && file.modified > 0 && file.modified < oldCutoff)
         )
@@ -210,7 +219,7 @@ private fun Cleaning(context: Context) {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        val stats = storageStats()
+        val stats = storageStats(context)
         InfoCard("Память телефона", "Всего: ${formatBytes(stats.first)}\nСвободно: ${formatBytes(stats.second)}\nЗанято: ${formatBytes((stats.first - stats.second).coerceAtLeast(0))}")
         if (!hasAllFilesAccess) {
             Button(onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth()) {
@@ -235,6 +244,17 @@ private fun Cleaning(context: Context) {
             },
             modifier = Modifier.fillMaxWidth()
         ) { Text(if (scanning) "Идёт проверка…" else "Проверить всё хранилище") }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Button(
+                enabled = hasAllFilesAccess,
+                onClick = { cacheClearLauncher.launch(Intent(StorageManager.ACTION_CLEAR_APP_CACHE)) },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Очистить кэш приложений через Android") }
+            InfoCard("Очистка кэша", "Android покажет системное подтверждение. Кэш очищается средствами системы, закрытые данные приложений не затрагиваются.")
+        } else {
+            Button(onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_MANAGE_STORAGE)) } },
+                modifier = Modifier.fillMaxWidth()) { Text("Открыть управление хранилищем") }
+        }
         InfoCard("Результат анализа", status)
         if (scanned) {
             MetricCard("Можно освободить по текущим правилам", formatBytes(reclaimable), Modifier.fillMaxWidth())
@@ -265,6 +285,9 @@ private fun Cleaning(context: Context) {
         SettingToggle("GIF-файлы", "Разрешить включать GIF в очистку", allowGif) {
             allowGif = it; prefs.edit().putBoolean("allow_gif", it).apply()
         }
+        SettingToggle("Архивы и установочные файлы", "ZIP, RAR, 7Z, TAR, GZ и установочные пакеты", allowArchives) {
+            allowArchives = it; prefs.edit().putBoolean("allow_archives", it).apply()
+        }
         SettingToggle("Повторяющиеся файлы", "Одинаковый размер — предварительный признак; перед удалением нужно проверить копии", allowDuplicates) {
             allowDuplicates = it; prefs.edit().putBoolean("allow_duplicates", it).apply()
         }
@@ -272,12 +295,15 @@ private fun Cleaning(context: Context) {
             allowOld = it; prefs.edit().putBoolean("allow_old", it).apply()
         }
         Text("Считать старыми через: $oldDays дней", color = Muted, fontSize = 13.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(30, 90, 180, 365).forEach { days ->
-                TextButton(onClick = {
-                    oldDays = days; prefs.edit().putInt("old_days", days).apply()
-                }) { Text("$days") }
-            }
+        androidx.compose.material3.Slider(
+            value = oldDays.toFloat(),
+            onValueChange = { oldDays = it.toInt().coerceIn(7, 730) },
+            onValueChangeFinished = { prefs.edit().putInt("old_days", oldDays).apply() },
+            valueRange = 7f..730f
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("7 дней", color = Muted, fontSize = 11.sp)
+            Text("730 дней", color = Muted, fontSize = 11.sp)
         }
         InfoCard("Ограничения Android", "Даже с этим разрешением Android закрывает часть системных каталогов, включая приватные данные приложений и некоторые папки Android/data и Android/obb.")
         InfoCard("Проверка дубликатов", "Дубликаты сравниваются по SHA-256 содержимого, а не только по размеру. Для защиты оставляется возможность вручную проверить список перед удалением.")
@@ -316,6 +342,7 @@ private fun scanAllFiles(): List<ScannedFile> {
                 val mime = java.net.URLConnection.guessContentTypeFromName(name).orEmpty().lowercase(Locale.ROOT)
                 val kind = when {
                     lower.endsWith(".gif") -> FileKind.GIF
+                    lower.matches(Regex(".*\\\\.(zip|rar|7z|tar|gz|bz2|xz|apk|xapk|apks)$")) -> FileKind.ARCHIVE
                     mime.startsWith("image/") || lower.matches(Regex(".*\\.(jpg|jpeg|png|webp|heic|bmp)$")) -> FileKind.PHOTO
                     mime.startsWith("video/") || lower.matches(Regex(".*\\.(mp4|mkv|mov|avi|webm|3gp)$")) -> FileKind.VIDEO
                     mime.startsWith("audio/") || lower.matches(Regex(".*\\.(mp3|m4a|aac|wav|flac|ogg|opus)$")) -> FileKind.AUDIO
@@ -367,7 +394,7 @@ private fun Games() {
 @Composable
 private fun Monitoring(context: Context) {
     MetricCard("Свободная оперативная память", memoryInfo(context), Modifier.fillMaxWidth())
-    val stats = storageStats()
+    val stats = storageStats(context)
     MetricCard("Свободное хранилище", formatBytes(stats.second), Modifier.fillMaxWidth())
     MetricCard("Тепловое состояние", thermalInfo(context), Modifier.fillMaxWidth())
 }
@@ -397,10 +424,22 @@ private fun InfoCard(title: String, description: String) {
         }
     }
 }
-private fun storageStats(): Pair<Long, Long> = runCatching {
-    val stat = StatFs(Environment.getExternalStorageDirectory().path)
-    stat.totalBytes to stat.availableBytes
-}.getOrDefault(0L to 0L)
+private fun storageStats(context: Context): Pair<Long, Long> = runCatching {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val storageManager = context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
+        val statsManager = context.getSystemService(Context.STORAGE_STATS_SERVICE) as StorageStatsManager
+        val uuid = storageManager.getUuidForPath(Environment.getExternalStorageDirectory())
+        statsManager.getTotalBytes(uuid) to statsManager.getFreeBytes(uuid)
+    } else {
+        val stat = StatFs(Environment.getExternalStorageDirectory().path)
+        stat.totalBytes to stat.availableBytes
+    }
+}.getOrElse {
+    runCatching {
+        val stat = StatFs(Environment.getExternalStorageDirectory().path)
+        stat.totalBytes to stat.availableBytes
+    }.getOrDefault(0L to 0L)
+}
 
 private fun hasStorageAccess(context: Context): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
     Environment.isExternalStorageManager()
