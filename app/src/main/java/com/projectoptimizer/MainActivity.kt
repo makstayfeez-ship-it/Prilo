@@ -151,11 +151,11 @@ private fun Dashboard(context: Context) {
     InfoCard(
         "Хранилище телефона",
         storage?.let {
-            "Занято: ${formatBytes(it.usedBytes)} из ${formatBytes(it.totalBytes)}\n" +
-                "Свободно: ${formatBytes(it.freeBytes)}\nИсточник: ${it.source}"
+            "Занято: ${formatStorageBytes(context, it.usedBytes)} из ${formatStorageBytes(context, it.totalBytes)}\n" +
+                "Свободно: ${formatStorageBytes(context, it.freeBytes)}\nИсточник: ${it.source}"
         } ?: "Получаю данные основного хранилища Android…"
     )
-    MetricCard("Свободно", storage?.let { formatBytes(it.freeBytes) } ?: "Проверка…", Modifier.fillMaxWidth())
+    MetricCard("Свободно", storage?.let { formatStorageBytes(context, it.freeBytes) } ?: "Проверка…", Modifier.fillMaxWidth())
     MetricCard("Свободная RAM", memoryInfo(context), Modifier.fillMaxWidth())
     MetricCard("Тепловое состояние", thermalInfo(context), Modifier.fillMaxWidth())
     InfoCard("Доступ к файлам", if (hasStorageAccess(context)) "Доступ к общему хранилищу предоставлен." else "Открой «Очистка» и выдай разрешение «Доступ ко всем файлам».")
@@ -208,7 +208,7 @@ private fun Cleaning(context: Context) {
             } else null
             status = when {
                 gained != null && gained > 0L ->
-                    "После системного запроса свободного места стало больше на ${formatBytes(gained)}."
+                    "После системного запроса свободного места стало больше на ${formatStorageBytes(context, gained)}."
                 freshStats == null ->
                     "Android вернул управление, но не удалось повторно прочитать память."
                 else ->
@@ -257,7 +257,7 @@ private fun Cleaning(context: Context) {
         InfoCard(
             "Память телефона",
             stats?.let {
-                "Всего: ${formatBytes(it.totalBytes)}\nЗанято: ${formatBytes(it.usedBytes)}\nСвободно: ${formatBytes(it.freeBytes)}\nИсточник: ${it.source}"
+                "Всего: ${formatStorageBytes(context, it.totalBytes)}\nЗанято: ${formatStorageBytes(context, it.usedBytes)}\nСвободно: ${formatStorageBytes(context, it.freeBytes)}\nИсточник: ${it.source}"
             } ?: "Получаю системные данные хранилища…"
         )
         if (!hasAccess) {
@@ -463,9 +463,9 @@ private fun Games() {
 private fun Monitoring(context: Context) {
     MetricCard("Свободная оперативная память", memoryInfo(context), Modifier.fillMaxWidth())
     val stats = rememberStorageStats(context)
-    MetricCard("Свободное хранилище", stats?.let { formatBytes(it.freeBytes) } ?: "Проверка…", Modifier.fillMaxWidth())
+    MetricCard("Свободное хранилище", stats?.let { formatStorageBytes(context, it.freeBytes) } ?: "Проверка…", Modifier.fillMaxWidth())
     if (stats != null) {
-        InfoCard("Сведения о накопителе", "Всего: ${formatBytes(stats.totalBytes)}\nЗанято: ${formatBytes(stats.usedBytes)}\nИсточник: ${stats.source}")
+        InfoCard("Сведения о накопителе", "Всего: ${formatStorageBytes(context, stats.totalBytes)}\nЗанято: ${formatStorageBytes(context, stats.usedBytes)}\nИсточник: ${stats.source}")
     }
     MetricCard("Тепловое состояние", thermalInfo(context), Modifier.fillMaxWidth())
 }
@@ -553,23 +553,25 @@ private fun readStorageStats(context: Context): StorageSnapshot? {
     val dataPath = Environment.getDataDirectory()
 
     if (statsManager != null) {
-        val uuids = linkedSetOf(StorageManager.UUID_DEFAULT)
+        val uuids = linkedMapOf<java.util.UUID, String>()
+        uuids[StorageManager.UUID_DEFAULT] = "Android · основной том"
 
         if (storageManager != null) {
-            runCatching { uuids.add(storageManager.getUuidForPath(primaryPath)) }
-            runCatching { uuids.add(storageManager.getUuidForPath(dataPath)) }
+            runCatching {
+                val uuid = storageManager.getUuidForPath(primaryPath)
+                if (!uuids.containsKey(uuid)) uuids[uuid] = "Android · общее хранилище"
+            }
+            runCatching {
+                val uuid = storageManager.getUuidForPath(dataPath)
+                if (!uuids.containsKey(uuid)) uuids[uuid] = "Android · резервный том"
+            }
         }
 
-        uuids.forEachIndexed { index, uuid ->
+        uuids.forEach { (uuid, source) ->
             val candidate = runCatching {
                 val total = statsManager.getTotalBytes(uuid)
                 val free = statsManager.getFreeBytes(uuid)
                 if (total > 0L && free >= 0L && free <= total) {
-                    val source = when {
-                        uuid == StorageManager.UUID_DEFAULT -> "Android · основной том"
-                        index == 1 -> "Android · общее хранилище"
-                        else -> "Android · резервный том"
-                    }
                     StorageSnapshot(total, free, source)
                 } else null
             }.getOrNull()
@@ -664,6 +666,11 @@ private fun thermalInfo(context: Context): String = runCatching {
         else -> "Неизвестно"
     }
 }.getOrDefault("Недоступно")
+private fun formatStorageBytes(context: Context, bytes: Long): String =
+    runCatching {
+        android.text.format.Formatter.formatFileSize(context, bytes.coerceAtLeast(0L))
+    }.getOrElse { formatBytes(bytes) }
+
 private fun formatBytes(bytes: Long): String {
     if (bytes <= 0) return "0 Б"
     val units = listOf("Б", "КБ", "МБ", "ГБ", "ТБ")
