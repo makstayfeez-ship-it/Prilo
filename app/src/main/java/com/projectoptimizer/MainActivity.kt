@@ -883,30 +883,55 @@ private fun Games(context: Context) {
     Column(verticalArrangement = Arrangement.spacedBy(15.dp)) {
         ScreenHeading("GAME CENTER", "Игровой центр", "Твоя игровая зона: запускай игры и включай фокус перед матчем.")
         Column(
-            Modifier.fillMaxWidth()
-                .background(
-                    Brush.linearGradient(listOf(Color(0xFF5B547D), Color(0xFF35434B), Color(0xFF202E34))),
-                    RoundedCornerShape(28.dp)
-                )
-                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(28.dp))
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(30.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF51447A), Color(0xFF302F4C), Color(0xFF1D292F))))
+                .border(1.dp, Color(0xFFB69AFF).copy(alpha = .22f), RoundedCornerShape(30.dp))
                 .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(15.dp)
         ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("OPTIMIZER / GAME", color = Peach, fontSize = 10.sp, letterSpacing = 2.sp)
-                Icon(Icons.Default.Gamepad, contentDescription = null, tint = Peach)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("OPTIMIZER / GAME", color = Color(0xFFC7B5FF), fontSize = 10.sp, letterSpacing = 2.sp)
+                    Text("Игровой режим", color = Color.White, fontSize = 25.sp)
+                }
+                Box(Modifier.size(44.dp).clip(RoundedCornerShape(15.dp)).background(Color.White.copy(alpha = .10f)), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    Icon(Icons.Default.Gamepad, contentDescription = null, tint = Color(0xFFC7B5FF), modifier = Modifier.size(25.dp))
+                }
             }
-            Text("Время играть.", color = Color.White, fontSize = 29.sp)
-            Text(
-                "Избранные игры, быстрый запуск и меньше отвлекающих уведомлений.",
-                color = Color.White.copy(alpha = 0.76f),
-                fontSize = 13.sp,
-                lineHeight = 19.sp
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                GameStatPill("${chosenGames.size} ИГР")
-                GameStatPill(if (hasDndAccess) "ФОКУС ДОСТУПЕН" else "ФОКУС НЕ НАСТРОЕН")
+            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Box(Modifier.size(100.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        drawArc(Color.White.copy(alpha = .12f), -90f, 360f, false, style = Stroke(width = 9.dp.toPx()))
+                        drawArc(Brush.sweepGradient(listOf(Color(0xFF9C76FF), Color(0xFF62D9BD), Color(0xFF9C76FF))), -90f, if (focusActive) 300f else 220f, false, style = Stroke(width = 9.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                    }
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                        Text(if (focusActive) "ON" else "READY", color = Color.White, fontSize = 17.sp)
+                        Text("FOCUS", color = Color(0xFFC7B5FF), fontSize = 8.sp, letterSpacing = 1.sp)
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("Твоя игровая зона", color = Color.White, fontSize = 18.sp)
+                    Text("Быстрый запуск игр и меньше отвлекающих уведомлений во время матча.", color = Color.White.copy(alpha = .68f), fontSize = 12.sp, lineHeight = 18.sp)
+                    Text(chosenGames.size.toString() + " ИГР В БИБЛИОТЕКЕ", color = Color(0xFFB6F0D8), fontSize = 10.sp, letterSpacing = 1.sp)
+                }
             }
+            androidx.compose.material3.Surface(
+                onClick = {
+                    val first = chosenGames.firstOrNull()
+                    if (first != null) launchGame(context, first.packageName, focusBeforeLaunch)
+                    else showPicker = true
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(17.dp),
+                color = Color(0xFFB69AFF)
+            ) {
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Icon(Icons.Default.Gamepad, contentDescription = null, tint = Color(0xFF211A36))
+                    Spacer(Modifier.width(9.dp))
+                    Text(if (chosenGames.isEmpty()) "ДОБАВИТЬ ПЕРВУЮ ИГРУ" else "ЗАПУСТИТЬ ИГРУ", color = Color(0xFF211A36), fontSize = 12.sp, letterSpacing = 1.sp)
+                }
+            }
+            Text("Инструменты используют возможности Android и не обещают искусственного прироста FPS.", color = Color.White.copy(alpha = .55f), fontSize = 10.sp, lineHeight = 15.sp)
         }
 
         ScreenSectionLabel("ИГРОВОЙ ФОКУС")
