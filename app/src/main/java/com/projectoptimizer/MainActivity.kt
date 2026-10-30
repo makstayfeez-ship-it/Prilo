@@ -85,7 +85,7 @@ private enum class FileKind(val title: String) {
 }
 private data class ScannedFile(
     val uri: Uri, val name: String, val size: Long, val modified: Long,
-    val kind: FileKind, val location: String
+    val kind: FileKind, val location: String, val sha256: String? = null
 )
 
 @Composable
@@ -176,7 +176,7 @@ private fun Cleaning(context: Context) {
 
     val protectedKinds = setOf(FileKind.PHOTO, FileKind.VIDEO, FileKind.AUDIO)
     val duplicateUris = remember(files) {
-        files.filter { it.size > 0 }.groupBy { it.size }.values
+        files.filter { it.size > 0 && it.sha256 != null }.groupBy { it.sha256 }.values
             .filter { it.size > 1 }.flatten().map { it.uri }.toSet()
     }
     val oldCutoff = System.currentTimeMillis() / 1000 - oldDays.toLong() * 24 * 60 * 60
@@ -266,7 +266,7 @@ private fun Cleaning(context: Context) {
             }
         }
         InfoCard("Важные ограничения", "Android выдаёт доступ только к выбранной папке и её содержимому. Чтобы проверить другую папку, подключи её отдельно. Приватные данные и кэш других приложений недоступны обычному приложению.")
-        InfoCard("Важно о дубликатах", "Сейчас одинаковый размер используется только для предварительного поиска. Это ещё не доказательство, что содержимое файлов совпадает. Не удаляй такие файлы, пока не добавим точную проверку содержимого.")
+        InfoCard("Проверка дубликатов", "Дубликаты сравниваются по SHA-256 содержимого, а не только по размеру. Для защиты оставляется возможность вручную проверить список перед удалением.")
     }
 }
 
@@ -306,8 +306,25 @@ private fun scanTree(context: Context, treeUri: Uri): List<ScannedFile> {
         }
     }
     walk(root, root.name ?: "Выбранная папка", 0)
-    return result
+    // Hash only same-size groups to avoid reading every file twice.
+    return result.groupBy { it.size }.values.flatMap { sameSize ->
+        if (sameSize.size < 2 || sameSize.first().size <= 0) sameSize
+        else sameSize.map { file -> file.copy(sha256 = hashFile(context, file.uri)) }
+    }
 }
+
+private fun hashFile(context: Context, uri: Uri): String? = runCatching {
+    val digest = java.security.MessageDigest.getInstance("SHA-256")
+    context.contentResolver.openInputStream(uri)?.buffered()?.use { input ->
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+    } ?: return null
+    digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+}.getOrNull()
 
 @Composable
 private fun Games() {
