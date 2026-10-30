@@ -178,7 +178,7 @@ private fun Cleaning(context: Context) {
     val protectedKinds = setOf(FileKind.PHOTO, FileKind.VIDEO, FileKind.AUDIO)
     val duplicateUris = remember(files) {
         files.filter { it.size > 0 && it.sha256 != null }.groupBy { it.sha256 }.values
-            .filter { it.size > 1 }.flatten().map { it.uri }.toSet()
+            .filter { it.size > 1 }.flatMap { it.drop(1) }.map { it.uri }.toSet()
     }
     val oldCutoff = System.currentTimeMillis() / 1000 - oldDays.toLong() * 24 * 60 * 60
     val candidates = files.filter { file ->
