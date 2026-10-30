@@ -90,7 +90,7 @@ class MainActivity : ComponentActivity() {
 
 private data class TabItem(val title: String, val icon: ImageVector)
 private enum class FileKind(val title: String) {
-    PHOTO("Фото"), VIDEO("Видео"), AUDIO("Аудио"), GIF("GIF"), ARCHIVE("Архивы"), OTHER("Другие файлы")
+    PHOTO("Фото"), VIDEO("Видео"), AUDIO("Аудио"), GIF("GIF"), CACHE("Кэш и временные"), ARCHIVE("Архивы"), OTHER("Другие файлы")
 }
 private data class ScannedFile(
     val uri: Uri, val name: String, val size: Long, val modified: Long,
@@ -263,16 +263,24 @@ private fun Cleaning(context: Context) {
         }, modifier = Modifier.fillMaxWidth()) { Text(if (scanning) "Идёт поиск…" else "Найти файлы") }
         if (scanning || deleting) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(if (scanning) "Поиск файлов · найдено: $foundCount" else "Удаление выбранных файлов…", color = Accent) }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Button(enabled = hasAccess && !scanning && !deleting, onClick = {
+            Button(enabled = !scanning && !deleting, onClick = {
                 cacheFreeBefore = storageStats(context).second
-                status = "Запрашиваю системную очистку кэша…"
-                runCatching { cacheLauncher.launch(Intent(StorageManager.ACTION_CLEAR_APP_CACHE)) }.onFailure { status = "Не удалось запустить очистку Android: ${it.message ?: "ошибка"}"; cacheFreeBefore = -1L }
-            }, modifier = Modifier.fillMaxWidth()) { Text("Запросить очистку кэша Android") }
+                val ownCacheBytes = clearOwnAppCache(context)
+                status = "Кэш Project Optimizer очищен: ${formatBytes(ownCacheBytes)}. Запрашиваю системную очистку других приложений…"
+                runCatching { cacheLauncher.launch(Intent(StorageManager.ACTION_CLEAR_APP_CACHE)) }.onFailure {
+                    status = "Кэш Project Optimizer очищен: ${formatBytes(ownCacheBytes)}. Android не запустил общую очистку."
+                    cacheFreeBefore = -1L
+                }
+            }, modifier = Modifier.fillMaxWidth()) { Text("Очистить кэш") }
             InfoCard("Кэш приложений", "Закрытый кэш других приложений может очищать только Android. После возврата приложение сравнит свободное место и покажет фактический прирост.")
         }
         InfoCard("Состояние", status)
         Text(lastDeleted, color = Accent, fontSize = 13.sp)
         if (scanned) {
+            Button(enabled = eligible.isNotEmpty() && !deleting, onClick = {
+                selected = eligible.map { it.uri.toString() }.toSet()
+                showDialog = true
+            }, modifier = Modifier.fillMaxWidth()) { Text("Полная очистка · ${eligible.size} файлов") }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { showLocked = false }, modifier = Modifier.weight(1f)) { Text("Найденные (${files.size})") }
                 Button(onClick = { showLocked = true }, modifier = Modifier.weight(1f)) { Text("Под замком (${locked.size})") }
@@ -345,6 +353,7 @@ private fun scanAllFiles(onProgress: (Int) -> Unit = {}): List<ScannedFile> {
                 val lower = name.lowercase(Locale.ROOT)
                 val mime = java.net.URLConnection.guessContentTypeFromName(name).orEmpty().lowercase(Locale.ROOT)
                 val kind = when {
+                    isCacheCandidate(file.parent ?: "", lower) -> FileKind.CACHE
                     lower.endsWith(".gif") -> FileKind.GIF
                     lower.matches(Regex(".*\\.(zip|rar|7z|tar|gz|bz2|xz|apk|xapk|apks)$")) -> FileKind.ARCHIVE
                     mime.startsWith("image/") || lower.matches(Regex(".*\\.(jpg|jpeg|png|webp|heic|bmp)$")) -> FileKind.PHOTO
@@ -392,6 +401,7 @@ private fun scanDocumentTree(context: Context, treeUri: Uri): List<ScannedFile> 
                 val lower = name.lowercase(Locale.ROOT)
                 val mime = item.type.orEmpty().lowercase(Locale.ROOT)
                 val kind = when {
+                    isCacheCandidate(item.parentFile?.name.orEmpty(), lower) -> FileKind.CACHE
                     lower.endsWith(".gif") -> FileKind.GIF
                     lower.matches(Regex(".*\\\\.(zip|rar|7z|tar|gz|bz2|xz|apk|xapk|apks)$")) -> FileKind.ARCHIVE
                     mime.startsWith("image/") || lower.matches(Regex(".*\\\\.(jpg|jpeg|png|webp|heic|bmp)$")) -> FileKind.PHOTO
@@ -458,11 +468,50 @@ private fun InfoCard(title: String, description: String) {
         }
     }
 }
+
+private fun isCacheCandidate(parentPath: String, fileName: String): Boolean {
+    val normalized = parentPath.replace('\\', '/').lowercase(Locale.ROOT)
+    val cacheFolders = setOf("cache", ".cache", "caches", "tmp", "temp", ".thumbnails", "thumbnails")
+    val inCacheFolder = normalized.split('/').any { it in cacheFolders }
+    val temporaryFile = fileName.endsWith(".tmp") || fileName.endsWith(".temp") ||
+        fileName.endsWith(".cache") || fileName.startsWith("thumb_")
+    return inCacheFolder || temporaryFile
+}
+
+private fun clearOwnAppCache(context: Context): Long {
+    fun directoryBytes(file: java.io.File): Long {
+        if (!file.exists()) return 0L
+        if (file.isFile) return file.length()
+        return file.listFiles()?.sumOf { directoryBytes(it) } ?: 0L
+    }
+    val dirs = (listOf(context.cacheDir) + context.externalCacheDirs.filterNotNull()).distinctBy { it.absolutePath }
+    return dirs.sumOf { dir ->
+        val bytes = directoryBytes(dir)
+        runCatching { dir.listFiles()?.forEach { it.deleteRecursively() } }
+        bytes
+    }
+}
+
 private fun storageStats(context: Context): Pair<Long, Long> = runCatching {
-    val stat = StatFs(Environment.getExternalStorageDirectory().absolutePath)
-    val total = stat.totalBytes
-    total to stat.availableBytes.coerceIn(0L, total)
-}.getOrElse { 0L to 0L }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val storageManager = context.getSystemService(StorageManager::class.java)
+        val statsManager = context.getSystemService(StorageStatsManager::class.java)
+        val uuid = storageManager.getUuidForPath(Environment.getExternalStorageDirectory())
+        val total = statsManager.getTotalBytes(uuid)
+        val free = statsManager.getFreeBytes(uuid).coerceIn(0L, total)
+        total to free
+    } else {
+        val stat = StatFs(Environment.getExternalStorageDirectory().absolutePath)
+        val total = stat.totalBytes
+        total to stat.availableBytes.coerceIn(0L, total)
+    }
+}.getOrElse {
+    runCatching {
+        val stat = StatFs(Environment.getExternalStorageDirectory().absolutePath)
+        val total = stat.totalBytes
+        total to stat.availableBytes.coerceIn(0L, total)
+    }.getOrElse { 0L to 0L }
+}
 private fun hasStorageAccess(context: Context): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
     Environment.isExternalStorageManager()
 } else {
