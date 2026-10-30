@@ -383,6 +383,43 @@ private fun DashboardMetric(title: String, value: String, caption: String, tint:
 }
 
 @Composable
+private fun StorageHeroCard(
+    free: String,
+    total: String,
+    used: String,
+    progress: Float,
+    source: String
+) {
+    Column(
+        Modifier.fillMaxWidth()
+            .background(Brush.linearGradient(listOf(Color(0xFF526E68), Color(0xFF354B4D), Color(0xFF26353A))), RoundedCornerShape(28.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.13f), RoundedCornerShape(28.dp))
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(13.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("ХРАНИЛИЩЕ", color = Peach, fontSize = 11.sp, letterSpacing = 2.sp)
+            Text("●", color = Accent, fontSize = 15.sp)
+        }
+        Text(free, color = Color(0xFFF8F5EF), fontSize = 35.sp)
+        Text("свободно из " + total, color = Color.White.copy(alpha = 0.78f), fontSize = 13.sp)
+        Box(Modifier.fillMaxWidth().height(11.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.22f))) {
+            Box(Modifier.fillMaxWidth(progress.coerceIn(0.015f, 1f)).height(11.dp).clip(RoundedCornerShape(20.dp)).background(AccentGradient))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("ЗАНЯТО", color = Color.White.copy(alpha = 0.65f), fontSize = 9.sp, letterSpacing = 1.sp)
+                Text(used, color = Color.White, fontSize = 14.sp)
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("ИСТОЧНИК", color = Color.White.copy(alpha = 0.65f), fontSize = 9.sp, letterSpacing = 1.sp)
+                Text(source, color = Color.White, fontSize = 10.sp)
+            }
+        }
+    }
+}
+
+@Composable
 private fun Cleaning(context: Context) {
     val prefs = remember { context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE) }
     var hasAccess by remember { mutableStateOf(hasStorageAccess(context)) }
