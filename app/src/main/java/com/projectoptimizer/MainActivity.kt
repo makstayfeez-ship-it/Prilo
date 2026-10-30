@@ -397,6 +397,7 @@ private fun Cleaning(context: Context) {
     var deleting by remember { mutableStateOf(false) }
     var scanned by remember { mutableStateOf(false) }
     var showLocked by remember { mutableStateOf(false) }
+    var selectedCategory by remember { mutableStateOf<FileKind?>(null) }
     var showDialog by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("Нажми «Найти файлы», чтобы проверить хранилище.") }
     var foundCount by remember { mutableIntStateOf(0) }
@@ -442,13 +443,13 @@ private fun Cleaning(context: Context) {
     val duplicates = remember(files) { files.filter { it.sha256 != null && it.size > 0 }.groupBy { it.sha256 }.values.filter { it.size > 1 }.flatMap { it.drop(1) }.map { it.uri }.toSet() }
     val cutoff = System.currentTimeMillis() / 1000 - oldDays.toLong() * 86400L
     val eligible = files.filter { file -> file.kind !in protected && file.uri.toString() !in locked && ((file.kind == FileKind.CACHE) || (allowGif && file.kind == FileKind.GIF) || (allowArchives && file.kind == FileKind.ARCHIVE) || (allowDuplicates && file.uri in duplicates) || (allowOld && file.modified > 0 && file.modified < cutoff)) }
-    val selectedFiles = files.filter { it.uri.toString() in selected && it.uri.toString() !in locked && it.kind !in protected }
+    val selectedFiles = files.filter { it.uri.toString() in selected && it.uri.toString() !in locked }
     val selectedBytes = selectedFiles.sumOf { it.size }
-    val visible = if (showLocked) files.filter { it.uri.toString() in locked } else files
+    val visible = files.filter { file -> (if (showLocked) file.uri.toString() in locked else file.uri.toString() !in locked) && (selectedCategory == null || file.kind == selectedCategory) }
     if (showDialog) AlertDialog(
         onDismissRequest = { showDialog = false },
         title = { Text("Подтвердить очистку") },
-        text = { Text("Выбрано файлов: ${selectedFiles.size}. Освободится примерно ${formatBytes(selectedBytes)}. Фото, видео, аудио и файлы под замком защищены.") },
+        text = { Text("Выбрано файлов: ${selectedFiles.size}. Освободится примерно ${formatBytes(selectedBytes)}. Файлы под замком защищены. Личные фото, видео и аудио выбраны только вручную.") },
         confirmButton = { TextButton(onClick = {
             showDialog = false
             deleting = true
@@ -544,47 +545,9 @@ private fun Cleaning(context: Context) {
             FeatureCard("Доступ к хранилищу активен", "Личные фото, видео и аудио защищены от автоматического выбора. Перед удалением всегда можно проверить каждый файл.", Accent)
         }
 
-        Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(23.dp))
-                .background(Panel).border(1.dp, Color.White.copy(alpha = .06f), RoundedCornerShape(23.dp))
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Дополнительная папка", color = Color.White, fontSize = 15.sp)
-                    Text(if (extraFolder == null) "Подключи папку для проверки" else "Папка подключена к сканированию", color = Muted, fontSize = 11.sp)
-                }
-                Text("＋", color = Accent, fontSize = 25.sp, modifier = Modifier.clickable { folderPicker.launch(null) }.padding(5.dp))
-            }
-            PrimaryActionButton(if (extraFolder == null) "Выбрать папку" else "Изменить папку", onClick = { folderPicker.launch(null) }, modifier = Modifier.fillMaxWidth())
-            if (extraFolder != null) {
-                TextButton(onClick = { extraFolder = null; prefs.edit().remove("extra_folder_uri").apply(); status = "Дополнительная папка отключена." }) { Text("Отключить папку", color = Coral) }
-            }
-        }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Column(Modifier.fillMaxWidth().background(Color(0xFF242F35), RoundedCornerShape(22.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("КЭШ ПРИЛОЖЕНИЙ", color = Peach, fontSize = 10.sp, letterSpacing = 1.5.sp)
-                Text("Очистка кэша", color = Color.White, fontSize = 16.sp)
-                Text("Сначала очищается кэш самого оптимизатора, затем Android может показать системный запрос на очистку кэша других приложений.", color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
-                PrimaryActionButton(
-                    "Запустить очистку кэша",
-                    onClick = {
-                        cacheFreeBefore = stats?.freeBytes ?: -1L
-                        deleting = true
-                        scope.launch {
-                            val ownCacheBytes = withContext(Dispatchers.IO) { clearOwnAppCache(context) }
-                            deleting = false
-                            status = "Кэш Project Optimizer очищен: " + formatBytes(ownCacheBytes) + ". Запрашиваю системную очистку других приложений…"
-                            runCatching { cacheLauncher.launch(Intent(StorageManager.ACTION_CLEAR_APP_CACHE)) }
-                                .onFailure { status = "Кэш Project Optimizer очищен: " + formatBytes(ownCacheBytes) + ". Android не запустил общую очистку."; cacheFreeBefore = -1L }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        }
+
+
 
         Column(Modifier.fillMaxWidth().background(Color(0xFF1B292D), RoundedCornerShape(22.dp)).padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Text("ПОСЛЕДНЕЕ ДЕЙСТВИЕ", color = Peach, fontSize = 9.sp, letterSpacing = 1.5.sp)
@@ -600,6 +563,29 @@ private fun Cleaning(context: Context) {
                         Text(files.size.toString() + " файлов найдено", color = Color.White, fontSize = 19.sp)
                     }
                     Text("↻", color = Accent, fontSize = 23.sp, modifier = Modifier.clickable { scanned = false }.padding(5.dp))
+                }
+                val categoryOptions = listOf(
+                    null to "Все",
+                    FileKind.VIDEO to "Видео",
+                    FileKind.PHOTO to "Фото",
+                    FileKind.CACHE to "Кэш",
+                    FileKind.AUDIO to "Аудио",
+                    FileKind.ARCHIVE to "Архивы",
+                    FileKind.GIF to "GIF",
+                    FileKind.OTHER to "Другие"
+                )
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    categoryOptions.forEach { (kind, label) ->
+                        val active = selectedCategory == kind
+                        androidx.compose.material3.Surface(
+                            onClick = { selectedCategory = kind; limit = 100 },
+                            color = if (active) Accent.copy(alpha = .18f) else Color(0xFF26353A),
+                            shape = RoundedCornerShape(30.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (active) Accent else Color.White.copy(alpha = .06f))
+                        ) {
+                            Text(label + " · " + files.count { it.kind == kind || kind == null }.toString(), Modifier.padding(horizontal = 13.dp, vertical = 9.dp), color = if (active) Accent else Color.White, fontSize = 10.sp)
+                        }
+                    }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                     DashboardMetric("Выбрано", selectedFiles.size.toString(), formatBytes(selectedBytes), Accent, Modifier.weight(1f))
@@ -633,10 +619,10 @@ private fun Cleaning(context: Context) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(file.name, color = Color.White, fontSize = 12.sp, maxLines = 1)
                             Text(formatBytes(file.size) + " · " + file.kind.title, color = Muted, fontSize = 10.sp)
-                            Text(if (isProtected) "Личный тип файла · защищён" else file.location, color = Muted, fontSize = 9.sp, maxLines = 1)
+                            Text(if (isProtected) "Личный файл · выбери вручную" else file.location, color = Muted, fontSize = 9.sp, maxLines = 1)
                             Text(if (isLocked) "Под замком" else "Нажми замок, чтобы защитить", color = if (isLocked) Peach else Muted, fontSize = 9.sp, modifier = Modifier.clickable { locked = if (isLocked) locked - key else locked + key; prefs.edit().putStringSet("locked_uris", locked).apply(); if (!isLocked) selected = selected - key })
                         }
-                        if (!showLocked && !isProtected && !isLocked) {
+                        if (!showLocked && !isLocked) {
                             Checkbox(checked = key in selected, onCheckedChange = { yes -> selected = if (yes) selected + key else selected - key })
                         } else if (showLocked) {
                             TextButton(onClick = { locked = locked - key; prefs.edit().putStringSet("locked_uris", locked).apply() }) { Text("Снять", color = Accent) }
