@@ -156,6 +156,7 @@ private fun Cleaning(context: Context) {
     var allowGif by remember { mutableStateOf(prefs.getBoolean("allow_gif", true)) }
     var allowDuplicates by remember { mutableStateOf(prefs.getBoolean("allow_duplicates", true)) }
     var allowOld by remember { mutableStateOf(prefs.getBoolean("allow_old", false)) }
+    var lockedUris by remember { mutableStateOf(prefs.getStringSet("locked_uris", emptySet())?.toSet() ?: emptySet()) }
     var oldDays by remember { mutableIntStateOf(prefs.getInt("old_days", 180)) }
     val scope = rememberCoroutineScope()
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -181,7 +182,7 @@ private fun Cleaning(context: Context) {
     }
     val oldCutoff = System.currentTimeMillis() / 1000 - oldDays.toLong() * 24 * 60 * 60
     val candidates = files.filter { file ->
-        file.kind !in protectedKinds && (
+        file.kind !in protectedKinds && file.uri.toString() !in lockedUris && (
             (allowGif && file.kind == FileKind.GIF) ||
             (allowDuplicates && file.uri in duplicateUris) ||
             (allowOld && file.modified > 0 && file.modified < oldCutoff)
@@ -245,6 +246,21 @@ private fun Cleaning(context: Context) {
                 onClick = { showDeleteDialog = true },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Удалить безопасно отобранное") }
+            Text("Найденные файлы — можно поставить под замок", color = Color.White, fontSize = 15.sp)
+            candidates.take(40).forEach { file ->
+                SettingToggle(
+                    file.name,
+                    formatBytes(file.size) + " · " + file.location,
+                    file.uri.toString() in lockedUris
+                ) { locked ->
+                    lockedUris = if (locked) lockedUris + file.uri.toString()
+                        else lockedUris - file.uri.toString()
+                    prefs.edit().putStringSet("locked_uris", lockedUris).apply()
+                }
+            }
+            if (candidates.size > 40) {
+                Text("Показаны первые 40 из " + candidates.size + ". Остальные также учитываются в расчёте.", color = Muted, fontSize = 12.sp)
+            }
         }
         InfoCard("Защита по умолчанию", "Фото, видео и аудио всегда исключены из удаления. Даже если они попали в выбранную папку, очистка их не тронет.")
         Text("Что разрешено искать и удалять", color = Color.White, fontSize = 16.sp)
