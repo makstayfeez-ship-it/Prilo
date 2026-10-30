@@ -473,114 +473,193 @@ private fun Cleaning(context: Context) {
         }) { Text("Удалить выбранное") } },
         dismissButton = { TextButton(onClick = { showDialog = false }) { Text("Отмена") } }
     )
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(17.dp)) {
         val stats = rememberStorageStats(context)
-        ScreenHeading("SMART CLEANUP", "Очистка", "Найди лишнее, проверь список и освободи место безопасно.")
-        StorageHeroCard(
-            free = stats?.let { formatStorageBytes(context, it.freeBytes) } ?: "Проверка…",
-            total = stats?.let { formatStorageBytes(context, it.totalBytes) } ?: "Получаю данные…",
-            used = stats?.let { formatStorageBytes(context, it.usedBytes) } ?: "—",
-            progress = stats?.let { it.usedBytes.toFloat() / it.totalBytes.coerceAtLeast(1L).toFloat() } ?: 0f,
-            source = stats?.source ?: "Android"
-        )
-        ScreenSectionLabel("ДОСТУП И СКАНИРОВАНИЕ")
-        if (!hasAccess) {
-            Button(onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth()) { Text("Разрешить доступ ко всем файлам") }
-            InfoCard("Доступ Android", "Включи специальное разрешение в системных настройках и вернись в приложение.")
-        } else InfoCard("Доступ предоставлен", "Проверяется доступное общее хранилище. Закрытые системные каталоги Android могут быть недоступны.")
-        Button(enabled = !scanning && !deleting, onClick = { folderPicker.launch(extraFolder?.let(Uri::parse)) }, modifier = Modifier.fillMaxWidth()) {
-            Text(if (extraFolder == null) "Добавить папку для полного сканирования" else "Выбрать другую дополнительную папку")
-        }
-        if (extraFolder != null) {
-            InfoCard("Дополнительная папка", "Папка подключена. Она будет включена в следующий поиск.")
-            TextButton(onClick = { extraFolder = null; prefs.edit().remove("extra_folder_uri").apply(); status = "Дополнительная папка отключена." }) { Text("Отключить дополнительную папку") }
-        }
-        Button(enabled = hasAccess && !scanning && !deleting, onClick = {
-            scanning = true; scanned = false; showLocked = false; foundCount = 0; selected = emptySet(); status = "Идёт поиск файлов…"
-            scope.launch {
-                val result = withContext(Dispatchers.IO) {
-                    val shared = scanAllFiles { n -> if (n % 100 == 0) scope.launch(Dispatchers.Main) { foundCount = n } }
-                    val extra = extraFolder?.let { scanDocumentTree(context, Uri.parse(it)) }.orEmpty()
-                    (shared + extra).distinctBy { it.uri }
-                }
-                files = result
-                selected = result.filter { file -> file.kind !in protected && ((allowGif && file.kind == FileKind.GIF) || (allowArchives && file.kind == FileKind.ARCHIVE) || (allowOld && file.modified > 0 && file.modified < cutoff)) }.map { it.uri.toString() }.toSet()
-                limit = 100; scanned = true; scanning = false
-                status = "Поиск завершён. Найдено файлов: ${result.size}. Проверь список и отметь нужное."
+        ScreenHeading("SMART CLEANUP / 01", "Очистка", "Порядок в хранилище — без риска удалить важные файлы.")
+
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(30.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF345B52), Color(0xFF203B3B), Color(0xFF1A292E))))
+                .border(1.dp, Color(0xFF9FD9B8).copy(alpha = .22f), RoundedCornerShape(30.dp))
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("АНАЛИЗ ХРАНИЛИЩА", color = Color(0xFFBDE8CB), fontSize = 10.sp, letterSpacing = 1.8.sp)
+                Text(if (scanned) "● ГОТОВО" else "● ОЖИДАНИЕ", color = if (scanned) Accent else Peach, fontSize = 9.sp, letterSpacing = 1.sp)
             }
-        }, modifier = Modifier.fillMaxWidth()) { Text(if (scanning) "Идёт поиск…" else "Найти файлы") }
-        if (scanning || deleting) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(if (scanning) "Поиск файлов · найдено: $foundCount" else "Удаление выбранных файлов…", color = Accent) }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Button(enabled = !scanning && !deleting, onClick = {
-                cacheFreeBefore = stats?.freeBytes ?: -1L
-                deleting = true
-                scope.launch {
-                    val ownCacheBytes = withContext(Dispatchers.IO) { clearOwnAppCache(context) }
-                    deleting = false
-                    status = "Кэш Project Optimizer очищен: ${formatBytes(ownCacheBytes)}. Запрашиваю системную очистку других приложений…"
-                    runCatching {
-                        cacheLauncher.launch(Intent(StorageManager.ACTION_CLEAR_APP_CACHE))
-                    }.onFailure {
-                        status = "Кэш Project Optimizer очищен: ${formatBytes(ownCacheBytes)}. Android не запустил общую очистку."
-                        cacheFreeBefore = -1L
+            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Box(Modifier.size(112.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        drawArc(Color.White.copy(alpha = .12f), -90f, 360f, false, style = Stroke(width = 10.dp.toPx()))
+                        val fraction = stats?.let { it.usedBytes.toFloat() / it.totalBytes.coerceAtLeast(1L).toFloat() } ?: 0f
+                        drawArc(Brush.sweepGradient(listOf(Accent, Peach, Coral, Accent)), -90f, fraction.coerceIn(0f, 1f) * 360f, false, style = Stroke(width = 10.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                    }
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                        Text(stats?.let { ((it.usedBytes.toFloat() / it.totalBytes.coerceAtLeast(1L)) * 100).toInt().toString() + "%" } ?: "—", color = Color.White, fontSize = 25.sp)
+                        Text("ЗАНЯТО", color = Muted, fontSize = 9.sp, letterSpacing = 1.sp)
                     }
                 }
-            }, modifier = Modifier.fillMaxWidth()) { Text("Очистить кэш") }
-            InfoCard("Кэш приложений", "Закрытый кэш других приложений может очищать только Android. После возврата приложение сравнит свободное место и покажет фактический прирост.")
-        }
-        InfoCard("Состояние", status)
-        Text(lastDeleted, color = Accent, fontSize = 13.sp)
-        if (scanned) {
-            ScreenSectionLabel("РЕЗУЛЬТАТЫ ПОИСКА")
-            Button(enabled = eligible.isNotEmpty() && !deleting, onClick = {
-                selected = eligible.map { it.uri.toString() }.toSet()
-                showDialog = true
-            }, modifier = Modifier.fillMaxWidth()) { Text("Полная очистка · ${eligible.size} файлов") }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { showLocked = false }, modifier = Modifier.weight(1f)) { Text("Найденные (${files.size})") }
-                Button(onClick = { showLocked = true }, modifier = Modifier.weight(1f)) { Text("Под замком (${locked.size})") }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("Свободно", color = Color(0xFFBDE8CB), fontSize = 11.sp)
+                    Text(stats?.let { formatStorageBytes(context, it.freeBytes) } ?: "Проверка…", color = Color.White, fontSize = 27.sp)
+                    Text("из " + (stats?.let { formatStorageBytes(context, it.totalBytes) } ?: "—"), color = Muted, fontSize = 12.sp)
+                    Text(stats?.let { "Занято " + formatStorageBytes(context, it.usedBytes) } ?: "Данные Android", color = Muted, fontSize = 10.sp)
+                }
             }
-            if (!showLocked) {
-                Text("Выбрано: ${selectedFiles.size} · ${formatBytes(selectedBytes)}", color = Accent)
-                Button(enabled = selectedFiles.isNotEmpty() && !deleting, onClick = { showDialog = true }, modifier = Modifier.fillMaxWidth()) { Text("Очистить выбранное") }
-            } else Text("Эти файлы исключены из очистки. Сними замок, чтобы вернуть их в общий список.", color = Muted, fontSize = 12.sp)
-            visible.take(limit).forEach { file ->
-                val key = file.uri.toString(); val isLocked = key in locked; val isProtected = file.kind in protected
-                Card(
-                    Modifier.fillMaxWidth().animateContentSize(),
-                    colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-                    shape = RoundedCornerShape(18.dp)
-                ) {
-                    Column(
-                        Modifier.fillMaxWidth()
-                            .background(CardGradient, RoundedCornerShape(18.dp))
-                            .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(18.dp))
-                            .padding(13.dp)
-                    ) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Column(Modifier.weight(1f)) {
-                                Text(file.name, color = Color.White, fontSize = 13.sp)
-                                Text("${formatBytes(file.size)} · ${file.kind.title}", color = Muted, fontSize = 11.sp)
-                                Text(file.location, color = Muted, fontSize = 10.sp)
-                            }
-                            if (!showLocked && !isProtected && !isLocked) Checkbox(checked = key in selected, onCheckedChange = { yes -> selected = if (yes) selected + key else selected - key })
+            androidx.compose.material3.Surface(
+                onClick = {
+                    scanning = true; scanned = false; showLocked = false; foundCount = 0; selected = emptySet(); status = "Идёт поиск файлов…"
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            val shared = scanAllFiles { n -> if (n % 100 == 0) scope.launch(Dispatchers.Main) { foundCount = n } }
+                            val extra = extraFolder?.let { scanDocumentTree(context, Uri.parse(it)) }.orEmpty()
+                            (shared + extra).distinctBy { it.uri }
                         }
-                        TextButton(onClick = { locked = if (isLocked) locked - key else locked + key; prefs.edit().putStringSet("locked_uris", locked).apply(); if (!isLocked) selected = selected - key }) { Text(if (isLocked) "Снять замок" else "Поставить под замок") }
+                        files = result
+                        selected = result.filter { file -> file.kind !in protected && ((allowGif && file.kind == FileKind.GIF) || (allowArchives && file.kind == FileKind.ARCHIVE) || (allowOld && file.modified > 0 && file.modified < cutoff)) }.map { it.uri.toString() }.toSet()
+                        limit = 100; scanned = true; scanning = false
+                        status = "Поиск завершён. Найдено файлов: " + result.size + ". Проверь список и отметь нужное."
                     }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = hasAccess && !scanning && !deleting,
+                shape = RoundedCornerShape(17.dp),
+                color = Accent
+            ) {
+                Row(Modifier.padding(vertical = 15.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text(if (scanning) "СКАНИРОВАНИЕ…" else "⌕  НАЙТИ ЛИШНИЕ ФАЙЛЫ", color = Color(0xFF14241F), fontSize = 12.sp, letterSpacing = 1.sp)
                 }
             }
-            if (visible.size > limit) Button(onClick = { limit += 100 }, modifier = Modifier.fillMaxWidth()) { Text("Показать ещё (${visible.size - limit})") }
-            if (visible.isEmpty()) InfoCard("Пусто", if (showLocked) "Нет файлов под замком." else "Файлы не найдены.")
+            if (scanning) {
+                LinearProgressIndicator(Modifier.fillMaxWidth(), color = Accent, trackColor = Color.White.copy(alpha = .12f))
+                Text("Просматриваю хранилище · найдено: " + foundCount, color = Color.White.copy(alpha = .78f), fontSize = 11.sp)
+            }
         }
-        ScreenSectionLabel("ПРАВИЛА ПОИСКА")
-        SettingToggle("GIF-файлы", "Автоматически отмечать GIF", allowGif) { allowGif = it; prefs.edit().putBoolean("allow_gif", it).apply() }
-        SettingToggle("Архивы и установочные файлы", "ZIP, RAR, 7Z, TAR, GZ, APK и другие", allowArchives) { allowArchives = it; prefs.edit().putBoolean("allow_archives", it).apply() }
-        SettingToggle("Повторяющиеся файлы", "Точные копии по SHA-256", allowDuplicates) { allowDuplicates = it; prefs.edit().putBoolean("allow_duplicates", it).apply() }
-        SettingToggle("Старые файлы", "Автоматически отмечать файлы старше срока", allowOld) { allowOld = it; prefs.edit().putBoolean("allow_old", it).apply() }
-        Text("Считать старыми через: $oldDays дней", color = Muted, fontSize = 13.sp)
-        androidx.compose.material3.Slider(value = oldDays.toFloat(), onValueChange = { oldDays = it.toInt().coerceIn(7, 730) }, onValueChangeFinished = { prefs.edit().putInt("old_days", oldDays).apply() }, valueRange = 7f..730f)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("7 дней", color = Muted, fontSize = 11.sp); Text("730 дней", color = Muted, fontSize = 11.sp) }
-        InfoCard("Ограничения", "Сканируются доступные общие файлы. Android закрывает приватные данные приложений и часть Android/data и Android/obb. Фото, видео и аудио не отмечаются автоматически.")
+
+        if (!hasAccess) {
+            FeatureCard("Нужен доступ к файлам", "Разрешение Android позволяет проверить общие папки. Закрытые системные данные останутся недоступны.", Coral)
+            PrimaryActionButton("Открыть разрешения Android", onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth())
+        } else {
+            FeatureCard("Доступ к хранилищу активен", "Личные фото, видео и аудио защищены от автоматического выбора. Перед удалением всегда можно проверить каждый файл.", Accent)
+        }
+
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(23.dp))
+                .background(Panel).border(1.dp, Color.White.copy(alpha = .06f), RoundedCornerShape(23.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Дополнительная папка", color = Color.White, fontSize = 15.sp)
+                    Text(if (extraFolder == null) "Подключи папку для проверки" else "Папка подключена к сканированию", color = Muted, fontSize = 11.sp)
+                }
+                Text("＋", color = Accent, fontSize = 25.sp, modifier = Modifier.clickable { folderPicker.launch(null) }.padding(5.dp))
+            }
+            PrimaryActionButton(if (extraFolder == null) "Выбрать папку" else "Изменить папку", onClick = { folderPicker.launch(null) }, modifier = Modifier.fillMaxWidth())
+            if (extraFolder != null) {
+                TextButton(onClick = { extraFolder = null; prefs.edit().remove("extra_folder_uri").apply(); status = "Дополнительная папка отключена." }) { Text("Отключить папку", color = Coral) }
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Column(Modifier.fillMaxWidth().background(Color(0xFF242F35), RoundedCornerShape(22.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("КЭШ ПРИЛОЖЕНИЙ", color = Peach, fontSize = 10.sp, letterSpacing = 1.5.sp)
+                Text("Очистка кэша", color = Color.White, fontSize = 16.sp)
+                Text("Сначала очищается кэш самого оптимизатора, затем Android может показать системный запрос на очистку кэша других приложений.", color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
+                PrimaryActionButton(
+                    "Запустить очистку кэша",
+                    onClick = {
+                        cacheFreeBefore = stats?.freeBytes ?: -1L
+                        deleting = true
+                        scope.launch {
+                            val ownCacheBytes = withContext(Dispatchers.IO) { clearOwnAppCache(context) }
+                            deleting = false
+                            status = "Кэш Project Optimizer очищен: " + formatBytes(ownCacheBytes) + ". Запрашиваю системную очистку других приложений…"
+                            runCatching { cacheLauncher.launch(Intent(StorageManager.ACTION_CLEAR_APP_CACHE)) }
+                                .onFailure { status = "Кэш Project Optimizer очищен: " + formatBytes(ownCacheBytes) + ". Android не запустил общую очистку."; cacheFreeBefore = -1L }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        Column(Modifier.fillMaxWidth().background(Color(0xFF1B292D), RoundedCornerShape(22.dp)).padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text("ПОСЛЕДНЕЕ ДЕЙСТВИЕ", color = Peach, fontSize = 9.sp, letterSpacing = 1.5.sp)
+            Text(status, color = Color.White, fontSize = 12.sp, lineHeight = 18.sp)
+            Text(lastDeleted, color = Accent, fontSize = 11.sp)
+        }
+
+        if (scanned) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        ScreenSectionLabel("РЕЗУЛЬТАТ СКАНИРОВАНИЯ")
+                        Text(files.size.toString() + " файлов найдено", color = Color.White, fontSize = 19.sp)
+                    }
+                    Text("↻", color = Accent, fontSize = 23.sp, modifier = Modifier.clickable { scanned = false }.padding(5.dp))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                    DashboardMetric("Выбрано", selectedFiles.size.toString(), formatBytes(selectedBytes), Accent, Modifier.weight(1f))
+                    DashboardMetric("Можно проверить", eligible.size.toString(), "кандидатов", Peach, Modifier.weight(1f))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PrimaryActionButton("Все файлы", onClick = { showLocked = false }, modifier = Modifier.weight(1f))
+                    PrimaryActionButton("Под замком", onClick = { showLocked = true }, modifier = Modifier.weight(1f))
+                }
+                if (!showLocked) {
+                    PrimaryActionButton("Очистить выбранное · " + selectedFiles.size, onClick = { showDialog = true }, modifier = Modifier.fillMaxWidth())
+                    PrimaryActionButton("Выбрать безопасные файлы · " + eligible.size, onClick = { selected = eligible.map { it.uri.toString() }.toSet(); showDialog = true }, modifier = Modifier.fillMaxWidth())
+                } else {
+                    Text("Файлы под замком исключены из очистки.", color = Muted, fontSize = 11.sp)
+                }
+                visible.take(limit).forEach { file ->
+                    val key = file.uri.toString()
+                    val isLocked = key in locked
+                    val isProtected = file.kind in protected
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                            .background(Color(0xFF202D32))
+                            .border(1.dp, Color.White.copy(alpha = .06f), RoundedCornerShape(18.dp))
+                            .padding(13.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(Modifier.size(42.dp).clip(RoundedCornerShape(13.dp)).background(Color(0xFF34464A)), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                            Text(when (file.kind) { FileKind.PHOTO -> "▧"; FileKind.VIDEO -> "▶"; FileKind.AUDIO -> "♫"; FileKind.GIF -> "GIF"; FileKind.CACHE -> "⌁"; FileKind.ARCHIVE -> "ZIP"; else -> "▤" }, color = Accent, fontSize = 13.sp)
+                        }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(file.name, color = Color.White, fontSize = 12.sp, maxLines = 1)
+                            Text(formatBytes(file.size) + " · " + file.kind.title, color = Muted, fontSize = 10.sp)
+                            Text(if (isProtected) "Личный тип файла · защищён" else file.location, color = Muted, fontSize = 9.sp, maxLines = 1)
+                            Text(if (isLocked) "Под замком" else "Нажми замок, чтобы защитить", color = if (isLocked) Peach else Muted, fontSize = 9.sp, modifier = Modifier.clickable { locked = if (isLocked) locked - key else locked + key; prefs.edit().putStringSet("locked_uris", locked).apply(); if (!isLocked) selected = selected - key })
+                        }
+                        if (!showLocked && !isProtected && !isLocked) {
+                            Checkbox(checked = key in selected, onCheckedChange = { yes -> selected = if (yes) selected + key else selected - key })
+                        } else if (showLocked) {
+                            TextButton(onClick = { locked = locked - key; prefs.edit().putStringSet("locked_uris", locked).apply() }) { Text("Снять", color = Accent) }
+                        }
+                    }
+                }
+                if (visible.size > limit) PrimaryActionButton("Показать ещё " + (visible.size - limit), onClick = { limit += 100 }, modifier = Modifier.fillMaxWidth())
+                if (visible.isEmpty()) InfoCard("Список пуст", if (showLocked) "Нет файлов под замком." else "Файлы не найдены.")
+            }
+        }
+
+        Column(Modifier.fillMaxWidth().background(Color(0xFF1C292E), RoundedCornerShape(24.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            ScreenSectionLabel("УМНЫЕ ПРАВИЛА ОТБОРА")
+            Text("Что считать лишним", color = Color.White, fontSize = 17.sp)
+            SettingToggle("GIF-файлы", "Автоматически отмечать GIF", allowGif) { allowGif = it; prefs.edit().putBoolean("allow_gif", it).apply() }
+            SettingToggle("Архивы и APK", "ZIP, RAR, 7Z, TAR, GZ, APK и другие", allowArchives) { allowArchives = it; prefs.edit().putBoolean("allow_archives", it).apply() }
+            SettingToggle("Повторяющиеся файлы", "Точные копии по SHA-256", allowDuplicates) { allowDuplicates = it; prefs.edit().putBoolean("allow_duplicates", it).apply() }
+            SettingToggle("Старые файлы", "Отмечать файлы старше выбранного срока", allowOld) { allowOld = it; prefs.edit().putBoolean("allow_old", it).apply() }
+            Text("Считать старыми через: " + oldDays + " дней", color = Muted, fontSize = 12.sp)
+            androidx.compose.material3.Slider(value = oldDays.toFloat(), onValueChange = { oldDays = it.toInt().coerceIn(7, 730) }, onValueChangeFinished = { prefs.edit().putInt("old_days", oldDays).apply() }, valueRange = 7f..730f)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("7 дней", color = Muted, fontSize = 10.sp); Text("730 дней", color = Muted, fontSize = 10.sp) }
+        }
+        InfoCard("Защита данных Android", "Фото, видео и аудио не отмечаются автоматически. Закрытые папки приложений и часть системных каталогов недоступны из-за ограничений Android.")
     }
 }
 @Composable
