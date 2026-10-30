@@ -1,13 +1,16 @@
 package com.projectoptimizer
 
 import android.app.ActivityManager
+import android.app.NotificationManager
 import android.app.usage.StorageStatsManager
 import android.content.Intent
 import android.provider.Settings
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import android.os.Environment
 import android.os.PowerManager
 import android.os.StatFs
@@ -41,6 +44,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
@@ -63,6 +67,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -78,6 +84,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -224,7 +231,7 @@ private fun OptimizerApp(context: Context) {
                         when (page) {
                             0 -> Dashboard(context)
                             1 -> Cleaning(context)
-                            2 -> Games()
+                            2 -> Games(context)
                             3 -> Monitoring(context)
                             else -> Settings(context)
                         }
@@ -725,55 +732,341 @@ private fun hashFile(context: Context, uri: Uri): String? = runCatching {
     digest.digest().joinToString("") { byte -> "%02x".format(byte) }
 }.getOrNull()
 
+private data class LaunchableGame(
+    val label: String,
+    val packageName: String,
+    val isGameCategory: Boolean
+)
+
+private fun loadLaunchableApps(context: Context): List<LaunchableGame> = runCatching {
+    val pm = context.packageManager
+    val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+    pm.queryIntentActivities(launcherIntent, 0)
+        .mapNotNull { resolve ->
+            val activity = resolve.activityInfo ?: return@mapNotNull null
+            val packageName = activity.packageName
+            if (packageName == context.packageName) return@mapNotNull null
+            LaunchableGame(
+                label = activity.loadLabel(pm)?.toString() ?: packageName,
+                packageName = packageName,
+                isGameCategory = activity.applicationInfo.category == android.content.pm.ApplicationInfo.CATEGORY_GAME
+            )
+        }
+        .distinctBy { it.packageName }
+        .sortedWith(compareByDescending<LaunchableGame> { it.isGameCategory }.thenBy { it.label.lowercase(Locale.ROOT) })
+}.getOrDefault(emptyList())
+
+private fun hasNotificationPolicyAccess(context: Context): Boolean =
+    runCatching {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager?.isNotificationPolicyAccessGranted == true
+    }.getOrDefault(false)
+
+private fun setGameFocus(context: Context, enabled: Boolean): Boolean = runCatching {
+    val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+    if (!manager.isNotificationPolicyAccessGranted) return false
+    val prefs = context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE)
+    val active = prefs.getBoolean("game_focus_active", false)
+    if (enabled) {
+        if (!active) {
+            prefs.edit()
+                .putInt("game_focus_previous_filter", manager.currentInterruptionFilter)
+                .putBoolean("game_focus_active", true)
+                .apply()
+        }
+        manager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+    } else if (active) {
+        val previous = prefs.getInt(
+            "game_focus_previous_filter",
+            NotificationManager.INTERRUPTION_FILTER_ALL
+        )
+        manager.setInterruptionFilter(previous)
+        prefs.edit().putBoolean("game_focus_active", false).apply()
+    }
+    true
+}.getOrDefault(false)
+
+private fun launchGame(context: Context, packageName: String, focusBeforeLaunch: Boolean) {
+    if (focusBeforeLaunch && !hasNotificationPolicyAccess(context)) {
+        Toast.makeText(context, "Сначала разреши доступ к режиму «Не беспокоить».", Toast.LENGTH_LONG).show()
+        runCatching {
+            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+        }
+        return
+    }
+    if (focusBeforeLaunch && !setGameFocus(context, true)) {
+        Toast.makeText(context, "Не удалось включить игровой фокус.", Toast.LENGTH_LONG).show()
+        return
+    }
+    val launchIntent = runCatching { context.packageManager.getLaunchIntentForPackage(packageName) }.getOrNull()
+    if (launchIntent == null) {
+        Toast.makeText(context, "Не удалось открыть это приложение.", Toast.LENGTH_SHORT).show()
+        return
+    }
+    runCatching { context.startActivity(launchIntent) }
+        .onFailure { Toast.makeText(context, "Не получилось запустить приложение.", Toast.LENGTH_SHORT).show() }
+}
+
 @Composable
-private fun Games() {
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        ScreenHeading("GAME CENTER", "Игровой центр", "Подготовь телефон к игре и следи за его состоянием.")
+private fun GameAppRow(
+    app: LaunchableGame,
+    isAdded: Boolean,
+    onAdd: () -> Unit,
+    onRemove: (() -> Unit)? = null,
+    onLaunch: (() -> Unit)? = null
+) {
+    Row(
+        Modifier.fillMaxWidth()
+            .background(Panel, RoundedCornerShape(20.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.055f), RoundedCornerShape(20.dp))
+            .padding(13.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(11.dp)
+    ) {
+        Box(
+            Modifier.size(43.dp).clip(RoundedCornerShape(14.dp))
+                .background(Brush.linearGradient(listOf(Accent, Peach, Coral))),
+            contentAlignment = androidx.compose.ui.Alignment.Center
+        ) {
+            Text(app.label.take(1).uppercase(Locale.ROOT), color = Color(0xFF1B292B), fontSize = 19.sp)
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(app.label, color = Color.White, fontSize = 14.sp, maxLines = 1)
+            Text(
+                if (app.isGameCategory) "Игра · Android" else "Приложение",
+                color = Muted,
+                fontSize = 10.sp
+            )
+        }
+        if (onLaunch != null) {
+            Text(
+                "ИГРАТЬ",
+                color = Accent,
+                fontSize = 10.sp,
+                letterSpacing = 0.8.sp,
+                modifier = Modifier.clip(RoundedCornerShape(10.dp))
+                    .clickable { onLaunch() }
+                    .padding(horizontal = 7.dp, vertical = 10.dp)
+            )
+        } else if (onRemove != null) {
+            Text(
+                "УБРАТЬ",
+                color = Coral,
+                fontSize = 10.sp,
+                modifier = Modifier.clickable { onRemove() }.padding(7.dp)
+            )
+        } else {
+            Text(
+                if (isAdded) "ДОБАВЛЕНО" else "+ ДОБАВИТЬ",
+                color = if (isAdded) Muted else Accent,
+                fontSize = 9.sp,
+                modifier = Modifier.clickable { onAdd() }.padding(6.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun Games(context: Context) {
+    val prefs = remember { context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE) }
+    var installedApps by remember { mutableStateOf(loadLaunchableApps(context)) }
+    var selectedPackages by remember {
+        mutableStateOf(prefs.getStringSet("game_packages", emptySet())?.toSet() ?: emptySet())
+    }
+    var focusBeforeLaunch by remember { mutableStateOf(prefs.getBoolean("game_focus_before_launch", false)) }
+    var focusActive by remember { mutableStateOf(prefs.getBoolean("game_focus_active", false)) }
+    var hasDndAccess by remember { mutableStateOf(hasNotificationPolicyAccess(context)) }
+    var showPicker by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+
+    DisposableEffect(context) {
+        val lifecycle = (context as? ComponentActivity)?.lifecycle
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                installedApps = loadLaunchableApps(context)
+                selectedPackages = prefs.getStringSet("game_packages", emptySet())?.toSet() ?: emptySet()
+                focusBeforeLaunch = prefs.getBoolean("game_focus_before_launch", false)
+                focusActive = prefs.getBoolean("game_focus_active", false)
+                hasDndAccess = hasNotificationPolicyAccess(context)
+            }
+        }
+        lifecycle?.addObserver(observer)
+        onDispose { lifecycle?.removeObserver(observer) }
+    }
+
+    val chosenGames = installedApps.filter { it.packageName in selectedPackages }
+    val filteredApps = installedApps.filter {
+        it.label.contains(query, ignoreCase = true) || it.packageName.contains(query, ignoreCase = true)
+    }.take(80)
+
+    Column(verticalArrangement = Arrangement.spacedBy(15.dp)) {
+        ScreenHeading("GAME CENTER", "Игровой центр", "Твоя игровая зона: запускай игры и включай фокус перед матчем.")
         Column(
-            Modifier
-                .fillMaxWidth()
+            Modifier.fillMaxWidth()
                 .background(
-                    Brush.linearGradient(listOf(Color(0xFF526E68), Color(0xFF354B4D), Color(0xFF26353A))),
+                    Brush.linearGradient(listOf(Color(0xFF5B547D), Color(0xFF35434B), Color(0xFF202E34))),
                     RoundedCornerShape(28.dp)
                 )
                 .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(28.dp))
                 .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("GAME BOOSTER", color = Peach, fontSize = 10.sp, letterSpacing = 2.sp)
+                Text("OPTIMIZER / GAME", color = Peach, fontSize = 10.sp, letterSpacing = 2.sp)
                 Icon(Icons.Default.Gamepad, contentDescription = null, tint = Peach)
             }
-            Text("Больше контроля.\nМеньше отвлечений.", color = Color.White, fontSize = 25.sp)
+            Text("Время играть.", color = Color.White, fontSize = 29.sp)
             Text(
-                "Игровые профили и полезные инструменты будут собраны здесь.",
+                "Избранные игры, быстрый запуск и меньше отвлекающих уведомлений.",
                 color = Color.White.copy(alpha = 0.76f),
                 fontSize = 13.sp,
                 lineHeight = 19.sp
             )
-            androidx.compose.material3.Surface(
-                color = Accent.copy(alpha = 0.18f),
-                shape = RoundedCornerShape(50)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                GameStatPill("${chosenGames.size} ИГР")
+                GameStatPill(if (hasDndAccess) "ФОКУС ДОСТУПЕН" else "ФОКУС НЕ НАСТРОЕН")
+            }
+        }
+
+        ScreenSectionLabel("ИГРОВОЙ ФОКУС")
+        SettingToggle(
+            "Не беспокоить перед запуском",
+            "Перед запуском выбранной игры включает приоритетный режим Android. Разрешение можно отключить в системных настройках.",
+            focusBeforeLaunch
+        ) { checked ->
+            if (checked && !hasNotificationPolicyAccess(context)) {
+                Toast.makeText(context, "Разреши доступ к режиму «Не беспокоить» в настройках Android.", Toast.LENGTH_LONG).show()
+                runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
+            } else {
+                focusBeforeLaunch = checked
+                prefs.edit().putBoolean("game_focus_before_launch", checked).apply()
+            }
+        }
+        if (!hasDndAccess && focusBeforeLaunch) {
+            PrimaryActionButton(
+                "Настроить режим «Не беспокоить»",
+                onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) } },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        if (focusActive) {
+            Column(
+                Modifier.fillMaxWidth().background(Color(0xFF293A36), RoundedCornerShape(18.dp)).padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    "РАЗДЕЛ В РАЗРАБОТКЕ",
-                    Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                    color = Accent,
-                    fontSize = 10.sp,
-                    letterSpacing = 1.sp
+                Text("Игровой фокус включён", color = Accent, fontSize = 14.sp)
+                Text("Когда закончишь играть, верни предыдущий режим уведомлений.", color = Muted, fontSize = 11.sp)
+                PrimaryActionButton(
+                    "Вернуть обычный режим",
+                    onClick = {
+                        if (setGameFocus(context, false)) {
+                            focusActive = false
+                            Toast.makeText(context, "Обычный режим уведомлений восстановлен.", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Не удалось восстановить режим. Проверь доступ Android.", Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }
-        ScreenSectionLabel("ЧТО БУДЕТ В GAME CENTER")
-        FeatureCard("Игровые профили", "Отдельные настройки и быстрые действия для каждой игры.", Peach)
-        FeatureCard("Фокус во время игры", "Быстрый доступ к режиму «Не беспокоить» и другим доступным настройкам Android.", Coral)
-        FeatureCard("Контроль нагрузки", "Температурное состояние, свободная память и предупреждения о перегреве.", Accent)
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            ScreenSectionLabel("МОИ ИГРЫ")
+            Text(
+                "+ ДОБАВИТЬ",
+                color = Accent,
+                fontSize = 11.sp,
+                letterSpacing = 0.7.sp,
+                modifier = Modifier.clickable { showPicker = !showPicker; query = "" }.padding(6.dp)
+            )
+        }
+        if (chosenGames.isEmpty()) {
+            InfoCard(
+                "Добавь первую игру",
+                "Нажми «Добавить» и выбери установленную игру. После этого её можно будет запускать прямо отсюда."
+            )
+        } else {
+            chosenGames.forEach { app ->
+                GameAppRow(
+                    app = app,
+                    isAdded = true,
+                    onAdd = {},
+                    onRemove = {
+                        selectedPackages = selectedPackages - app.packageName
+                        prefs.edit().putStringSet("game_packages", selectedPackages).apply()
+                    },
+                    onLaunch = { launchGame(context, app.packageName, focusBeforeLaunch) }
+                )
+            }
+        }
+
+        if (showPicker) {
+            Column(
+                Modifier.fillMaxWidth().background(Color(0xFF182327), RoundedCornerShape(22.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(22.dp)).padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Выбери приложения", color = Color.White, fontSize = 16.sp)
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text("Поиск игры или приложения", color = Muted) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Accent,
+                        unfocusedBorderColor = Muted.copy(alpha = 0.3f),
+                        cursorColor = Accent
+                    )
+                )
+                if (filteredApps.isEmpty()) {
+                    Text("Подходящие приложения не найдены.", color = Muted, fontSize = 12.sp)
+                } else {
+                    filteredApps.forEach { app ->
+                        GameAppRow(
+                            app = app,
+                            isAdded = app.packageName in selectedPackages,
+                            onAdd = {
+                                selectedPackages = selectedPackages + app.packageName
+                                prefs.edit().putStringSet("game_packages", selectedPackages).apply()
+                            }
+                        )
+                    }
+                }
+                Text(
+                    "Показываются приложения с ярлыком запуска, доступные Android для этого приложения.",
+                    color = Muted,
+                    fontSize = 10.sp,
+                    lineHeight = 15.sp
+                )
+            }
+        }
+
+        ScreenSectionLabel("СОСТОЯНИЕ УСТРОЙСТВА")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            MetricCard("Свободная RAM", memoryInfo(context), Modifier.weight(1f))
+            MetricCard("Нагрев", thermalInfo(context), Modifier.weight(1f))
+        }
         InfoCard(
-            "Без фальшивого ускорения",
-            "Обычное приложение не может безопасно разгонять процессор или видеочип. Мы будем использовать реальные возможности Android и не обещать несуществующий прирост FPS."
+            "Что реально делает бустер",
+            "Game Center запускает выбранные приложения и по твоему разрешению включает приоритетный режим уведомлений. Он не разгоняет процессор, не очищает память другой игры и не рисует выдуманный FPS."
         )
     }
 }
+
+@Composable
+private fun GameStatPill(text: String) {
+    androidx.compose.material3.Surface(
+        color = Color.White.copy(alpha = 0.10f),
+        shape = RoundedCornerShape(50)
+    ) {
+        Text(text, Modifier.padding(horizontal = 10.dp, vertical = 7.dp), color = Color.White, fontSize = 9.sp, letterSpacing = 0.6.sp)
+    }
+}
+
 @Composable
 private fun Monitoring(context: Context) {
     val stats = rememberStorageStats(context)
