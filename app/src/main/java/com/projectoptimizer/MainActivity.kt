@@ -966,7 +966,7 @@ private fun MonitorMetricCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .background(if (inverse) CardGradient else Panel, RoundedCornerShape(22.dp))
+            .background(if (inverse) CardGradient else Brush.linearGradient(listOf(Panel, Panel)), RoundedCornerShape(22.dp))
             .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(22.dp))
             .padding(17.dp),
         verticalArrangement = Arrangement.spacedBy(9.dp)
