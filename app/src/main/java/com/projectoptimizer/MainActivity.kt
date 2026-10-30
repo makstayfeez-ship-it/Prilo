@@ -383,43 +383,6 @@ private fun DashboardMetric(title: String, value: String, caption: String, tint:
 }
 
 @Composable
-private fun StorageHeroCard(
-    free: String,
-    total: String,
-    used: String,
-    progress: Float,
-    source: String
-) {
-    Column(
-        Modifier.fillMaxWidth()
-            .background(Brush.linearGradient(listOf(Color(0xFF526E68), Color(0xFF354B4D), Color(0xFF26353A))), RoundedCornerShape(28.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.13f), RoundedCornerShape(28.dp))
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(13.dp)
-    ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("ХРАНИЛИЩЕ", color = Peach, fontSize = 11.sp, letterSpacing = 2.sp)
-            Text("●", color = Accent, fontSize = 15.sp)
-        }
-        Text(free, color = Color(0xFFF8F5EF), fontSize = 35.sp)
-        Text("свободно из " + total, color = Color.White.copy(alpha = 0.78f), fontSize = 13.sp)
-        Box(Modifier.fillMaxWidth().height(11.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.22f))) {
-            Box(Modifier.fillMaxWidth(progress.coerceIn(0.015f, 1f)).height(11.dp).clip(RoundedCornerShape(20.dp)).background(AccentGradient))
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text("ЗАНЯТО", color = Color.White.copy(alpha = 0.65f), fontSize = 9.sp, letterSpacing = 1.sp)
-                Text(used, color = Color.White, fontSize = 14.sp)
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text("ИСТОЧНИК", color = Color.White.copy(alpha = 0.65f), fontSize = 9.sp, letterSpacing = 1.sp)
-                Text(source, color = Color.White, fontSize = 10.sp)
-            }
-        }
-    }
-}
-
-@Composable
 private fun Cleaning(context: Context) {
     val prefs = remember { context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE) }
     var hasAccess by remember { mutableStateOf(hasStorageAccess(context)) }
@@ -510,114 +473,193 @@ private fun Cleaning(context: Context) {
         }) { Text("Удалить выбранное") } },
         dismissButton = { TextButton(onClick = { showDialog = false }) { Text("Отмена") } }
     )
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(17.dp)) {
         val stats = rememberStorageStats(context)
-        ScreenHeading("SMART CLEANUP", "Очистка", "Найди лишнее, проверь список и освободи место безопасно.")
-        StorageHeroCard(
-            free = stats?.let { formatStorageBytes(context, it.freeBytes) } ?: "Проверка…",
-            total = stats?.let { formatStorageBytes(context, it.totalBytes) } ?: "Получаю данные…",
-            used = stats?.let { formatStorageBytes(context, it.usedBytes) } ?: "—",
-            progress = stats?.let { it.usedBytes.toFloat() / it.totalBytes.coerceAtLeast(1L).toFloat() } ?: 0f,
-            source = stats?.source ?: "Android"
-        )
-        ScreenSectionLabel("ДОСТУП И СКАНИРОВАНИЕ")
-        if (!hasAccess) {
-            Button(onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth()) { Text("Разрешить доступ ко всем файлам") }
-            InfoCard("Доступ Android", "Включи специальное разрешение в системных настройках и вернись в приложение.")
-        } else InfoCard("Доступ предоставлен", "Проверяется доступное общее хранилище. Закрытые системные каталоги Android могут быть недоступны.")
-        Button(enabled = !scanning && !deleting, onClick = { folderPicker.launch(extraFolder?.let(Uri::parse)) }, modifier = Modifier.fillMaxWidth()) {
-            Text(if (extraFolder == null) "Добавить папку для полного сканирования" else "Выбрать другую дополнительную папку")
-        }
-        if (extraFolder != null) {
-            InfoCard("Дополнительная папка", "Папка подключена. Она будет включена в следующий поиск.")
-            TextButton(onClick = { extraFolder = null; prefs.edit().remove("extra_folder_uri").apply(); status = "Дополнительная папка отключена." }) { Text("Отключить дополнительную папку") }
-        }
-        Button(enabled = hasAccess && !scanning && !deleting, onClick = {
-            scanning = true; scanned = false; showLocked = false; foundCount = 0; selected = emptySet(); status = "Идёт поиск файлов…"
-            scope.launch {
-                val result = withContext(Dispatchers.IO) {
-                    val shared = scanAllFiles { n -> if (n % 100 == 0) scope.launch(Dispatchers.Main) { foundCount = n } }
-                    val extra = extraFolder?.let { scanDocumentTree(context, Uri.parse(it)) }.orEmpty()
-                    (shared + extra).distinctBy { it.uri }
-                }
-                files = result
-                selected = result.filter { file -> file.kind !in protected && ((allowGif && file.kind == FileKind.GIF) || (allowArchives && file.kind == FileKind.ARCHIVE) || (allowOld && file.modified > 0 && file.modified < cutoff)) }.map { it.uri.toString() }.toSet()
-                limit = 100; scanned = true; scanning = false
-                status = "Поиск завершён. Найдено файлов: ${result.size}. Проверь список и отметь нужное."
+        ScreenHeading("SMART CLEANUP / 01", "Очистка", "Порядок в хранилище — без риска удалить важные файлы.")
+
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(30.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF345B52), Color(0xFF203B3B), Color(0xFF1A292E))))
+                .border(1.dp, Color(0xFF9FD9B8).copy(alpha = .22f), RoundedCornerShape(30.dp))
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("АНАЛИЗ ХРАНИЛИЩА", color = Color(0xFFBDE8CB), fontSize = 10.sp, letterSpacing = 1.8.sp)
+                Text(if (scanned) "● ГОТОВО" else "● ОЖИДАНИЕ", color = if (scanned) Accent else Peach, fontSize = 9.sp, letterSpacing = 1.sp)
             }
-        }, modifier = Modifier.fillMaxWidth()) { Text(if (scanning) "Идёт поиск…" else "Найти файлы") }
-        if (scanning || deleting) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(if (scanning) "Поиск файлов · найдено: $foundCount" else "Удаление выбранных файлов…", color = Accent) }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Button(enabled = !scanning && !deleting, onClick = {
-                cacheFreeBefore = stats?.freeBytes ?: -1L
-                deleting = true
-                scope.launch {
-                    val ownCacheBytes = withContext(Dispatchers.IO) { clearOwnAppCache(context) }
-                    deleting = false
-                    status = "Кэш Project Optimizer очищен: ${formatBytes(ownCacheBytes)}. Запрашиваю системную очистку других приложений…"
-                    runCatching {
-                        cacheLauncher.launch(Intent(StorageManager.ACTION_CLEAR_APP_CACHE))
-                    }.onFailure {
-                        status = "Кэш Project Optimizer очищен: ${formatBytes(ownCacheBytes)}. Android не запустил общую очистку."
-                        cacheFreeBefore = -1L
+            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Box(Modifier.size(112.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        drawArc(Color.White.copy(alpha = .12f), -90f, 360f, false, style = Stroke(width = 10.dp.toPx()))
+                        val fraction = stats?.let { it.usedBytes.toFloat() / it.totalBytes.coerceAtLeast(1L).toFloat() } ?: 0f
+                        drawArc(Brush.sweepGradient(listOf(Accent, Peach, Coral, Accent)), -90f, fraction.coerceIn(0f, 1f) * 360f, false, style = Stroke(width = 10.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                    }
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                        Text(stats?.let { ((it.usedBytes.toFloat() / it.totalBytes.coerceAtLeast(1L)) * 100).toInt().toString() + "%" } ?: "—", color = Color.White, fontSize = 25.sp)
+                        Text("ЗАНЯТО", color = Muted, fontSize = 9.sp, letterSpacing = 1.sp)
                     }
                 }
-            }, modifier = Modifier.fillMaxWidth()) { Text("Очистить кэш") }
-            InfoCard("Кэш приложений", "Закрытый кэш других приложений может очищать только Android. После возврата приложение сравнит свободное место и покажет фактический прирост.")
-        }
-        InfoCard("Состояние", status)
-        Text(lastDeleted, color = Accent, fontSize = 13.sp)
-        if (scanned) {
-            ScreenSectionLabel("РЕЗУЛЬТАТЫ ПОИСКА")
-            Button(enabled = eligible.isNotEmpty() && !deleting, onClick = {
-                selected = eligible.map { it.uri.toString() }.toSet()
-                showDialog = true
-            }, modifier = Modifier.fillMaxWidth()) { Text("Полная очистка · ${eligible.size} файлов") }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { showLocked = false }, modifier = Modifier.weight(1f)) { Text("Найденные (${files.size})") }
-                Button(onClick = { showLocked = true }, modifier = Modifier.weight(1f)) { Text("Под замком (${locked.size})") }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("Свободно", color = Color(0xFFBDE8CB), fontSize = 11.sp)
+                    Text(stats?.let { formatStorageBytes(context, it.freeBytes) } ?: "Проверка…", color = Color.White, fontSize = 27.sp)
+                    Text("из " + (stats?.let { formatStorageBytes(context, it.totalBytes) } ?: "—"), color = Muted, fontSize = 12.sp)
+                    Text(stats?.let { "Занято " + formatStorageBytes(context, it.usedBytes) } ?: "Данные Android", color = Muted, fontSize = 10.sp)
+                }
             }
-            if (!showLocked) {
-                Text("Выбрано: ${selectedFiles.size} · ${formatBytes(selectedBytes)}", color = Accent)
-                Button(enabled = selectedFiles.isNotEmpty() && !deleting, onClick = { showDialog = true }, modifier = Modifier.fillMaxWidth()) { Text("Очистить выбранное") }
-            } else Text("Эти файлы исключены из очистки. Сними замок, чтобы вернуть их в общий список.", color = Muted, fontSize = 12.sp)
-            visible.take(limit).forEach { file ->
-                val key = file.uri.toString(); val isLocked = key in locked; val isProtected = file.kind in protected
-                Card(
-                    Modifier.fillMaxWidth().animateContentSize(),
-                    colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-                    shape = RoundedCornerShape(18.dp)
-                ) {
-                    Column(
-                        Modifier.fillMaxWidth()
-                            .background(CardGradient, RoundedCornerShape(18.dp))
-                            .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(18.dp))
-                            .padding(13.dp)
-                    ) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Column(Modifier.weight(1f)) {
-                                Text(file.name, color = Color.White, fontSize = 13.sp)
-                                Text("${formatBytes(file.size)} · ${file.kind.title}", color = Muted, fontSize = 11.sp)
-                                Text(file.location, color = Muted, fontSize = 10.sp)
-                            }
-                            if (!showLocked && !isProtected && !isLocked) Checkbox(checked = key in selected, onCheckedChange = { yes -> selected = if (yes) selected + key else selected - key })
+            androidx.compose.material3.Surface(
+                onClick = {
+                    scanning = true; scanned = false; showLocked = false; foundCount = 0; selected = emptySet(); status = "Идёт поиск файлов…"
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            val shared = scanAllFiles { n -> if (n % 100 == 0) scope.launch(Dispatchers.Main) { foundCount = n } }
+                            val extra = extraFolder?.let { scanDocumentTree(context, Uri.parse(it)) }.orEmpty()
+                            (shared + extra).distinctBy { it.uri }
                         }
-                        TextButton(onClick = { locked = if (isLocked) locked - key else locked + key; prefs.edit().putStringSet("locked_uris", locked).apply(); if (!isLocked) selected = selected - key }) { Text(if (isLocked) "Снять замок" else "Поставить под замок") }
+                        files = result
+                        selected = result.filter { file -> file.kind !in protected && ((allowGif && file.kind == FileKind.GIF) || (allowArchives && file.kind == FileKind.ARCHIVE) || (allowOld && file.modified > 0 && file.modified < cutoff)) }.map { it.uri.toString() }.toSet()
+                        limit = 100; scanned = true; scanning = false
+                        status = "Поиск завершён. Найдено файлов: " + result.size + ". Проверь список и отметь нужное."
                     }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = hasAccess && !scanning && !deleting,
+                shape = RoundedCornerShape(17.dp),
+                color = Accent
+            ) {
+                Row(Modifier.padding(vertical = 15.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text(if (scanning) "СКАНИРОВАНИЕ…" else "⌕  НАЙТИ ЛИШНИЕ ФАЙЛЫ", color = Color(0xFF14241F), fontSize = 12.sp, letterSpacing = 1.sp)
                 }
             }
-            if (visible.size > limit) Button(onClick = { limit += 100 }, modifier = Modifier.fillMaxWidth()) { Text("Показать ещё (${visible.size - limit})") }
-            if (visible.isEmpty()) InfoCard("Пусто", if (showLocked) "Нет файлов под замком." else "Файлы не найдены.")
+            if (scanning) {
+                LinearProgressIndicator(Modifier.fillMaxWidth(), color = Accent, trackColor = Color.White.copy(alpha = .12f))
+                Text("Просматриваю хранилище · найдено: " + foundCount, color = Color.White.copy(alpha = .78f), fontSize = 11.sp)
+            }
         }
-        ScreenSectionLabel("ПРАВИЛА ПОИСКА")
-        SettingToggle("GIF-файлы", "Автоматически отмечать GIF", allowGif) { allowGif = it; prefs.edit().putBoolean("allow_gif", it).apply() }
-        SettingToggle("Архивы и установочные файлы", "ZIP, RAR, 7Z, TAR, GZ, APK и другие", allowArchives) { allowArchives = it; prefs.edit().putBoolean("allow_archives", it).apply() }
-        SettingToggle("Повторяющиеся файлы", "Точные копии по SHA-256", allowDuplicates) { allowDuplicates = it; prefs.edit().putBoolean("allow_duplicates", it).apply() }
-        SettingToggle("Старые файлы", "Автоматически отмечать файлы старше срока", allowOld) { allowOld = it; prefs.edit().putBoolean("allow_old", it).apply() }
-        Text("Считать старыми через: $oldDays дней", color = Muted, fontSize = 13.sp)
-        androidx.compose.material3.Slider(value = oldDays.toFloat(), onValueChange = { oldDays = it.toInt().coerceIn(7, 730) }, onValueChangeFinished = { prefs.edit().putInt("old_days", oldDays).apply() }, valueRange = 7f..730f)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("7 дней", color = Muted, fontSize = 11.sp); Text("730 дней", color = Muted, fontSize = 11.sp) }
-        InfoCard("Ограничения", "Сканируются доступные общие файлы. Android закрывает приватные данные приложений и часть Android/data и Android/obb. Фото, видео и аудио не отмечаются автоматически.")
+
+        if (!hasAccess) {
+            FeatureCard("Нужен доступ к файлам", "Разрешение Android позволяет проверить общие папки. Закрытые системные данные останутся недоступны.", Coral)
+            PrimaryActionButton("Открыть разрешения Android", onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth())
+        } else {
+            FeatureCard("Доступ к хранилищу активен", "Личные фото, видео и аудио защищены от автоматического выбора. Перед удалением всегда можно проверить каждый файл.", Accent)
+        }
+
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(23.dp))
+                .background(Panel).border(1.dp, Color.White.copy(alpha = .06f), RoundedCornerShape(23.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Дополнительная папка", color = Color.White, fontSize = 15.sp)
+                    Text(if (extraFolder == null) "Подключи папку для проверки" else "Папка подключена к сканированию", color = Muted, fontSize = 11.sp)
+                }
+                Text("＋", color = Accent, fontSize = 25.sp, modifier = Modifier.clickable { folderPicker.launch(null) }.padding(5.dp))
+            }
+            PrimaryActionButton(if (extraFolder == null) "Выбрать папку" else "Изменить папку", onClick = { folderPicker.launch(null) }, modifier = Modifier.fillMaxWidth())
+            if (extraFolder != null) {
+                TextButton(onClick = { extraFolder = null; prefs.edit().remove("extra_folder_uri").apply(); status = "Дополнительная папка отключена." }) { Text("Отключить папку", color = Coral) }
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Column(Modifier.fillMaxWidth().background(Color(0xFF242F35), RoundedCornerShape(22.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("КЭШ ПРИЛОЖЕНИЙ", color = Peach, fontSize = 10.sp, letterSpacing = 1.5.sp)
+                Text("Очистка кэша", color = Color.White, fontSize = 16.sp)
+                Text("Сначала очищается кэш самого оптимизатора, затем Android может показать системный запрос на очистку кэша других приложений.", color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
+                PrimaryActionButton(
+                    "Запустить очистку кэша",
+                    onClick = {
+                        cacheFreeBefore = stats?.freeBytes ?: -1L
+                        deleting = true
+                        scope.launch {
+                            val ownCacheBytes = withContext(Dispatchers.IO) { clearOwnAppCache(context) }
+                            deleting = false
+                            status = "Кэш Project Optimizer очищен: " + formatBytes(ownCacheBytes) + ". Запрашиваю системную очистку других приложений…"
+                            runCatching { cacheLauncher.launch(Intent(StorageManager.ACTION_CLEAR_APP_CACHE)) }
+                                .onFailure { status = "Кэш Project Optimizer очищен: " + formatBytes(ownCacheBytes) + ". Android не запустил общую очистку."; cacheFreeBefore = -1L }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        Column(Modifier.fillMaxWidth().background(Color(0xFF1B292D), RoundedCornerShape(22.dp)).padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text("ПОСЛЕДНЕЕ ДЕЙСТВИЕ", color = Peach, fontSize = 9.sp, letterSpacing = 1.5.sp)
+            Text(status, color = Color.White, fontSize = 12.sp, lineHeight = 18.sp)
+            Text(lastDeleted, color = Accent, fontSize = 11.sp)
+        }
+
+        if (scanned) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        ScreenSectionLabel("РЕЗУЛЬТАТ СКАНИРОВАНИЯ")
+                        Text(files.size.toString() + " файлов найдено", color = Color.White, fontSize = 19.sp)
+                    }
+                    Text("↻", color = Accent, fontSize = 23.sp, modifier = Modifier.clickable { scanned = false }.padding(5.dp))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                    DashboardMetric("Выбрано", selectedFiles.size.toString(), formatBytes(selectedBytes), Accent, Modifier.weight(1f))
+                    DashboardMetric("Можно проверить", eligible.size.toString(), "кандидатов", Peach, Modifier.weight(1f))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PrimaryActionButton("Все файлы", onClick = { showLocked = false }, modifier = Modifier.weight(1f))
+                    PrimaryActionButton("Под замком", onClick = { showLocked = true }, modifier = Modifier.weight(1f))
+                }
+                if (!showLocked) {
+                    PrimaryActionButton("Очистить выбранное · " + selectedFiles.size, onClick = { showDialog = true }, modifier = Modifier.fillMaxWidth())
+                    PrimaryActionButton("Выбрать безопасные файлы · " + eligible.size, onClick = { selected = eligible.map { it.uri.toString() }.toSet(); showDialog = true }, modifier = Modifier.fillMaxWidth())
+                } else {
+                    Text("Файлы под замком исключены из очистки.", color = Muted, fontSize = 11.sp)
+                }
+                visible.take(limit).forEach { file ->
+                    val key = file.uri.toString()
+                    val isLocked = key in locked
+                    val isProtected = file.kind in protected
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                            .background(Color(0xFF202D32))
+                            .border(1.dp, Color.White.copy(alpha = .06f), RoundedCornerShape(18.dp))
+                            .padding(13.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(Modifier.size(42.dp).clip(RoundedCornerShape(13.dp)).background(Color(0xFF34464A)), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                            Text(when (file.kind) { FileKind.PHOTO -> "▧"; FileKind.VIDEO -> "▶"; FileKind.AUDIO -> "♫"; FileKind.GIF -> "GIF"; FileKind.CACHE -> "⌁"; FileKind.ARCHIVE -> "ZIP"; else -> "▤" }, color = Accent, fontSize = 13.sp)
+                        }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(file.name, color = Color.White, fontSize = 12.sp, maxLines = 1)
+                            Text(formatBytes(file.size) + " · " + file.kind.title, color = Muted, fontSize = 10.sp)
+                            Text(if (isProtected) "Личный тип файла · защищён" else file.location, color = Muted, fontSize = 9.sp, maxLines = 1)
+                            Text(if (isLocked) "Под замком" else "Нажми замок, чтобы защитить", color = if (isLocked) Peach else Muted, fontSize = 9.sp, modifier = Modifier.clickable { locked = if (isLocked) locked - key else locked + key; prefs.edit().putStringSet("locked_uris", locked).apply(); if (!isLocked) selected = selected - key })
+                        }
+                        if (!showLocked && !isProtected && !isLocked) {
+                            Checkbox(checked = key in selected, onCheckedChange = { yes -> selected = if (yes) selected + key else selected - key })
+                        } else if (showLocked) {
+                            TextButton(onClick = { locked = locked - key; prefs.edit().putStringSet("locked_uris", locked).apply() }) { Text("Снять", color = Accent) }
+                        }
+                    }
+                }
+                if (visible.size > limit) PrimaryActionButton("Показать ещё " + (visible.size - limit), onClick = { limit += 100 }, modifier = Modifier.fillMaxWidth())
+                if (visible.isEmpty()) InfoCard("Список пуст", if (showLocked) "Нет файлов под замком." else "Файлы не найдены.")
+            }
+        }
+
+        Column(Modifier.fillMaxWidth().background(Color(0xFF1C292E), RoundedCornerShape(24.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            ScreenSectionLabel("УМНЫЕ ПРАВИЛА ОТБОРА")
+            Text("Что считать лишним", color = Color.White, fontSize = 17.sp)
+            SettingToggle("GIF-файлы", "Автоматически отмечать GIF", allowGif) { allowGif = it; prefs.edit().putBoolean("allow_gif", it).apply() }
+            SettingToggle("Архивы и APK", "ZIP, RAR, 7Z, TAR, GZ, APK и другие", allowArchives) { allowArchives = it; prefs.edit().putBoolean("allow_archives", it).apply() }
+            SettingToggle("Повторяющиеся файлы", "Точные копии по SHA-256", allowDuplicates) { allowDuplicates = it; prefs.edit().putBoolean("allow_duplicates", it).apply() }
+            SettingToggle("Старые файлы", "Отмечать файлы старше выбранного срока", allowOld) { allowOld = it; prefs.edit().putBoolean("allow_old", it).apply() }
+            Text("Считать старыми через: " + oldDays + " дней", color = Muted, fontSize = 12.sp)
+            androidx.compose.material3.Slider(value = oldDays.toFloat(), onValueChange = { oldDays = it.toInt().coerceIn(7, 730) }, onValueChangeFinished = { prefs.edit().putInt("old_days", oldDays).apply() }, valueRange = 7f..730f)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("7 дней", color = Muted, fontSize = 10.sp); Text("730 дней", color = Muted, fontSize = 10.sp) }
+        }
+        InfoCard("Защита данных Android", "Фото, видео и аудио не отмечаются автоматически. Закрытые папки приложений и часть системных каталогов недоступны из-за ограничений Android.")
     }
 }
 @Composable
@@ -917,186 +959,193 @@ private fun Games(context: Context) {
         it.label.contains(query, ignoreCase = true) || it.packageName.contains(query, ignoreCase = true)
     }.take(80)
 
-    Column(verticalArrangement = Arrangement.spacedBy(15.dp)) {
-        ScreenHeading("GAME CENTER", "Игровой центр", "Твоя игровая зона: запускай игры и включай фокус перед матчем.")
+    Column(verticalArrangement = Arrangement.spacedBy(17.dp)) {
+        ScreenHeading("GAME CENTER / 02", "Игровой центр", "Игры, быстрый запуск и спокойный режим на время матча.")
+
         Column(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(30.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFF51447A), Color(0xFF302F4C), Color(0xFF1D292F))))
-                .border(1.dp, Color(0xFFB69AFF).copy(alpha = .22f), RoundedCornerShape(30.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF51417B), Color(0xFF302F50), Color(0xFF1D292F))))
+                .border(1.dp, Color(0xFFB69AFF).copy(alpha = .26f), RoundedCornerShape(30.dp))
                 .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(15.dp)
+            verticalArrangement = Arrangement.spacedBy(17.dp)
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("OPTIMIZER / GAME", color = Color(0xFFC7B5FF), fontSize = 10.sp, letterSpacing = 2.sp)
-                    Text("Игровой режим", color = Color.White, fontSize = 25.sp)
+                    Text("OPTIMIZER / PLAY", color = Color(0xFFD2C3FF), fontSize = 10.sp, letterSpacing = 2.sp)
+                    Text("Твоя игровая зона", color = Color.White, fontSize = 23.sp)
                 }
-                Box(Modifier.size(44.dp).clip(RoundedCornerShape(15.dp)).background(Color.White.copy(alpha = .10f)), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                    Icon(Icons.Default.Gamepad, contentDescription = null, tint = Color(0xFFC7B5FF), modifier = Modifier.size(25.dp))
+                Box(Modifier.size(48.dp).clip(RoundedCornerShape(16.dp)).background(Color.White.copy(alpha = .10f)), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    Icon(Icons.Default.Gamepad, contentDescription = "Игры", tint = Color(0xFFD2C3FF), modifier = Modifier.size(27.dp))
                 }
             }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Box(Modifier.size(100.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Box(Modifier.size(108.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
                     Canvas(Modifier.fillMaxSize()) {
-                        drawArc(Color.White.copy(alpha = .12f), -90f, 360f, false, style = Stroke(width = 9.dp.toPx()))
-                        drawArc(Brush.sweepGradient(listOf(Color(0xFF9C76FF), Color(0xFF62D9BD), Color(0xFF9C76FF))), -90f, if (focusActive) 300f else 220f, false, style = Stroke(width = 9.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                        drawArc(Color.White.copy(alpha = .13f), -90f, 360f, false, style = Stroke(width = 10.dp.toPx()))
+                        drawArc(Brush.sweepGradient(listOf(Color(0xFFB69AFF), Color(0xFF70DDC3), Color(0xFFB69AFF))), -90f, if (focusActive) 315f else 235f, false, style = Stroke(width = 10.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
                     }
                     Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                        Text(if (focusActive) "ON" else "READY", color = Color.White, fontSize = 17.sp)
-                        Text("FOCUS", color = Color(0xFFC7B5FF), fontSize = 8.sp, letterSpacing = 1.sp)
+                        Text(if (focusActive) "ON" else "READY", color = Color.White, fontSize = 18.sp)
+                        Text("FOCUS", color = Color(0xFFD2C3FF), fontSize = 8.sp, letterSpacing = 1.sp)
                     }
                 }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Text("Твоя игровая зона", color = Color.White, fontSize = 18.sp)
-                    Text("Быстрый запуск игр и меньше отвлекающих уведомлений во время матча.", color = Color.White.copy(alpha = .68f), fontSize = 12.sp, lineHeight = 18.sp)
-                    Text(chosenGames.size.toString() + " ИГР В БИБЛИОТЕКЕ", color = Color(0xFFB6F0D8), fontSize = 10.sp, letterSpacing = 1.sp)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(if (focusActive) "Фокус активен" else "Готов к запуску", color = Color.White, fontSize = 18.sp)
+                    Text("Библиотека игр и инструменты Android для игровых сессий.", color = Color.White.copy(alpha = .68f), fontSize = 11.sp, lineHeight = 17.sp)
+                    Text(selectedPackages.size.toString() + " В БИБЛИОТЕКЕ", color = Color(0xFFB6F0D8), fontSize = 10.sp, letterSpacing = 1.sp)
                 }
             }
             androidx.compose.material3.Surface(
                 onClick = {
                     val first = chosenGames.firstOrNull()
-                    if (first != null) launchGame(context, first.packageName, focusBeforeLaunch)
-                    else showPicker = true
+                    if (first != null) launchGame(context, first.packageName, focusBeforeLaunch) else showPicker = true
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(17.dp),
                 color = Color(0xFFB69AFF)
             ) {
-                Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Row(Modifier.padding(vertical = 15.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     Icon(Icons.Default.Gamepad, contentDescription = null, tint = Color(0xFF211A36))
                     Spacer(Modifier.width(9.dp))
-                    Text(if (chosenGames.isEmpty()) "ДОБАВИТЬ ПЕРВУЮ ИГРУ" else "ЗАПУСТИТЬ ИГРУ", color = Color(0xFF211A36), fontSize = 12.sp, letterSpacing = 1.sp)
+                    Text(if (chosenGames.isEmpty()) "ДОБАВИТЬ ПЕРВУЮ ИГРУ" else "БЫСТРЫЙ ЗАПУСК", color = Color(0xFF211A36), fontSize = 12.sp, letterSpacing = 1.sp)
                 }
             }
-            Text("Инструменты используют возможности Android и не обещают искусственного прироста FPS.", color = Color.White.copy(alpha = .55f), fontSize = 10.sp, lineHeight = 15.sp)
-        }
-
-        ScreenSectionLabel("ИГРОВОЙ ФОКУС")
-        SettingToggle(
-            "Не беспокоить перед запуском",
-            "Перед запуском выбранной игры включает приоритетный режим Android. Разрешение можно отключить в системных настройках.",
-            focusBeforeLaunch
-        ) { checked ->
-            if (checked && !hasNotificationPolicyAccess(context)) {
-                Toast.makeText(context, "Разреши доступ к режиму «Не беспокоить» в настройках Android.", Toast.LENGTH_LONG).show()
-                runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
-            } else {
-                focusBeforeLaunch = checked
-                prefs.edit().putBoolean("game_focus_before_launch", checked).apply()
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                GameStatPill("Библиотека · " + chosenGames.size)
+                GameStatPill("Установлено · " + installedApps.size)
+                GameStatPill(if (hasDndAccess) "Фокус доступен" else "Нужен доступ")
             }
         }
-        if (!hasDndAccess && focusBeforeLaunch) {
-            PrimaryActionButton(
-                "Настроить режим «Не беспокоить»",
-                onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) } },
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-        if (focusActive) {
-            Column(
-                Modifier.fillMaxWidth().background(Color(0xFF293A36), RoundedCornerShape(18.dp)).padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text("Игровой фокус включён", color = Accent, fontSize = 14.sp)
-                Text("Когда закончишь играть, верни предыдущий режим уведомлений.", color = Muted, fontSize = 11.sp)
-                PrimaryActionButton(
-                    "Вернуть обычный режим",
-                    onClick = {
-                        if (setGameFocus(context, false)) {
-                            focusActive = false
-                            Toast.makeText(context, "Обычный режим уведомлений восстановлен.", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(context, "Не удалось восстановить режим. Проверь доступ Android.", Toast.LENGTH_LONG).show()
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
+
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+                .background(Color(0xFF202B35)).border(1.dp, Color(0xFFB69AFF).copy(alpha = .13f), RoundedCornerShape(24.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(11.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("ИГРОВОЙ ФОКУС", color = Color(0xFFD2C3FF), fontSize = 10.sp, letterSpacing = 1.5.sp)
+                    Text("Меньше отвлечений", color = Color.White, fontSize = 17.sp)
+                }
+                Text(if (focusBeforeLaunch) "ON" else "OFF", color = if (focusBeforeLaunch) Accent else Muted, fontSize = 11.sp)
+            }
+            Text("Перед запуском игры Android может включить режим «Не беспокоить». Разрешение и фильтр уведомлений контролируются системой.", color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
+            SettingToggle(
+                "Включать перед запуском",
+                "Сохраняет настройку и использует системный режим при запуске выбранной игры.",
+                focusBeforeLaunch
+            ) { checked ->
+                if (checked && !hasNotificationPolicyAccess(context)) {
+                    Toast.makeText(context, "Разреши доступ к режиму «Не беспокоить» в настройках Android.", Toast.LENGTH_LONG).show()
+                    runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
+                } else {
+                    focusBeforeLaunch = checked
+                    prefs.edit().putBoolean("game_focus_before_launch", checked).apply()
+                }
+            }
+            if (!hasDndAccess && focusBeforeLaunch) {
+                PrimaryActionButton("Выдать системное разрешение", onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) } }, modifier = Modifier.fillMaxWidth())
+            }
+            if (focusActive) {
+                Column(Modifier.fillMaxWidth().background(Color(0xFF263D39), RoundedCornerShape(17.dp)).padding(13.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Игровой фокус сейчас включён", color = Accent, fontSize = 13.sp)
+                    Text("После завершения игры верни предыдущий режим уведомлений.", color = Muted, fontSize = 11.sp)
+                    PrimaryActionButton(
+                        "Восстановить обычный режим",
+                        onClick = {
+                            if (setGameFocus(context, false)) {
+                                focusActive = false
+                                Toast.makeText(context, "Обычный режим уведомлений восстановлен.", Toast.LENGTH_SHORT).show()
+                            } else Toast.makeText(context, "Не удалось восстановить режим. Проверь доступ Android.", Toast.LENGTH_LONG).show()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            ScreenSectionLabel("МОИ ИГРЫ")
-            Text(
-                "+ ДОБАВИТЬ",
-                color = Accent,
-                fontSize = 11.sp,
-                letterSpacing = 0.7.sp,
-                modifier = Modifier.clickable { showPicker = !showPicker; query = "" }.padding(6.dp)
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                ScreenSectionLabel("ТВОЯ КОЛЛЕКЦИЯ")
+                Text("Мои игры", color = Color.White, fontSize = 20.sp)
+            }
+            androidx.compose.material3.Surface(
+                onClick = { showPicker = !showPicker; query = "" },
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xFF3C3159)
+            ) { Text(if (showPicker) "ЗАКРЫТЬ" else "+ ДОБАВИТЬ", Modifier.padding(horizontal = 13.dp, vertical = 11.dp), color = Color(0xFFD2C3FF), fontSize = 10.sp, letterSpacing = .8.sp) }
         }
         if (chosenGames.isEmpty()) {
-            InfoCard(
-                "Добавь первую игру",
-                "Нажми «Добавить» и выбери установленную игру. После этого её можно будет запускать прямо отсюда."
-            )
+            Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(22.dp)).padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("🎮", fontSize = 28.sp)
+                Text("Здесь пока тихо", color = Color.White, fontSize = 17.sp)
+                Text("Добавь установленные игры — появятся быстрые кнопки запуска и отдельная библиотека.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                PrimaryActionButton("Выбрать игры", onClick = { showPicker = true; query = "" }, modifier = Modifier.fillMaxWidth())
+            }
         } else {
-            chosenGames.forEach { app ->
-                GameAppRow(
-                    app = app,
-                    isAdded = true,
-                    onAdd = {},
-                    onRemove = {
-                        selectedPackages = selectedPackages - app.packageName
-                        prefs.edit().putStringSet("game_packages", selectedPackages).apply()
-                    },
-                    onLaunch = { launchGame(context, app.packageName, focusBeforeLaunch) }
-                )
+            chosenGames.forEachIndexed { index, app ->
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color(0xFF202B35))
+                        .border(1.dp, Color.White.copy(alpha = .055f), RoundedCornerShape(20.dp))
+                        .padding(13.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(11.dp)
+                ) {
+                    Box(Modifier.size(48.dp).clip(RoundedCornerShape(15.dp)).background(Brush.linearGradient(listOf(Color(0xFF9B79E8), Color(0xFF54C5AF)))), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        Text(app.label.take(1).uppercase(Locale.ROOT), color = Color(0xFF1D2030), fontSize = 20.sp)
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(app.label, color = Color.White, fontSize = 14.sp, maxLines = 1)
+                        Text(if (app.isGameCategory) "ИГРА · " + (index + 1).toString().padStart(2, '0') else "ПРИЛОЖЕНИЕ · " + (index + 1).toString().padStart(2, '0'), color = Muted, fontSize = 9.sp, letterSpacing = .8.sp)
+                    }
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("ИГРАТЬ", color = Color(0xFFCDBEFF), fontSize = 10.sp, modifier = Modifier.clickable { launchGame(context, app.packageName, focusBeforeLaunch) }.padding(4.dp))
+                        Text("УБРАТЬ", color = Coral, fontSize = 9.sp, modifier = Modifier.clickable { selectedPackages = selectedPackages - app.packageName; prefs.edit().putStringSet("game_packages", selectedPackages).apply() }.padding(4.dp))
+                    }
+                }
             }
         }
 
         if (showPicker) {
-            Column(
-                Modifier.fillMaxWidth().background(Color(0xFF182327), RoundedCornerShape(22.dp))
-                    .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(22.dp)).padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text("Выбери приложения", color = Color.White, fontSize = 16.sp)
+            Column(Modifier.fillMaxWidth().background(Color(0xFF1A252C), RoundedCornerShape(23.dp)).border(1.dp, Color(0xFFB69AFF).copy(alpha = .18f), RoundedCornerShape(23.dp)).padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("ДОБАВИТЬ В БИБЛИОТЕКУ", color = Color(0xFFD2C3FF), fontSize = 10.sp, letterSpacing = 1.4.sp)
+                Text("Выбери приложение", color = Color.White, fontSize = 18.sp)
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    placeholder = { Text("Поиск игры или приложения", color = Muted) },
+                    placeholder = { Text("Поиск по названию", color = Muted) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = Accent,
-                        unfocusedBorderColor = Muted.copy(alpha = 0.3f),
-                        cursorColor = Accent
+                        focusedBorderColor = Color(0xFFB69AFF),
+                        unfocusedBorderColor = Muted.copy(alpha = .3f),
+                        cursorColor = Color(0xFFB69AFF)
                     )
                 )
-                if (filteredApps.isEmpty()) {
-                    Text("Подходящие приложения не найдены.", color = Muted, fontSize = 12.sp)
-                } else {
-                    filteredApps.forEach { app ->
-                        GameAppRow(
-                            app = app,
-                            isAdded = app.packageName in selectedPackages,
-                            onAdd = {
-                                selectedPackages = selectedPackages + app.packageName
-                                prefs.edit().putStringSet("game_packages", selectedPackages).apply()
-                            }
-                        )
-                    }
+                if (filteredApps.isEmpty()) Text("Ничего не найдено.", color = Muted, fontSize = 12.sp)
+                else filteredApps.forEach { app ->
+                    GameAppRow(
+                        app = app,
+                        isAdded = app.packageName in selectedPackages,
+                        onAdd = {
+                            selectedPackages = selectedPackages + app.packageName
+                            prefs.edit().putStringSet("game_packages", selectedPackages).apply()
+                        }
+                    )
                 }
-                Text(
-                    "Показываются приложения с ярлыком запуска, доступные Android для этого приложения.",
-                    color = Muted,
-                    fontSize = 10.sp,
-                    lineHeight = 15.sp
-                )
+                Text("Список включает приложения с доступным ярлыком запуска Android.", color = Muted, fontSize = 10.sp, lineHeight = 15.sp)
             }
         }
 
-        ScreenSectionLabel("СОСТОЯНИЕ УСТРОЙСТВА")
+        ScreenSectionLabel("ПЕРЕД МАТЧЕМ")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            MetricCard("Свободная RAM", memoryInfo(context), Modifier.weight(1f))
-            MetricCard("Нагрев", thermalInfo(context), Modifier.weight(1f))
+            MetricCard("Доступная RAM", memoryInfo(context), Modifier.weight(1f))
+            MetricCard("Температура", thermalInfo(context), Modifier.weight(1f))
         }
-        InfoCard(
-            "Что реально делает бустер",
-            "Game Center запускает выбранные приложения и по твоему разрешению включает приоритетный режим уведомлений. Он не разгоняет процессор, не очищает память другой игры и не рисует выдуманный FPS."
-        )
+        InfoCard("Честный игровой режим", "Game Center помогает запускать игры и по твоему разрешению включает системный режим уведомлений. Android сам управляет производительностью; приложение не подделывает FPS и не обещает разгон процессора.")
     }
 }
 
@@ -1161,35 +1210,89 @@ private fun Monitoring(context: Context) {
     val animatedMemory by animateFloatAsState(memoryFraction, tween(850), label = "monitor_memory")
     val thermal = thermalInfo(context)
 
-    Column(verticalArrangement = Arrangement.spacedBy(15.dp)) {
-        ScreenHeading("LIVE DEVICE ANALYTICS", "Мониторинг", "Показатели обновляются, пока открыт этот экран.")
-        MonitorMetricCard(
-            title = "Хранилище",
-            value = stats?.let { formatStorageBytes(context, it.freeBytes) } ?: "Проверка…",
-            subtitle = stats?.let { "Свободно из " + formatStorageBytes(context, it.totalBytes) } ?: "Ожидаем данные Android",
-            fraction = 1f - animatedStorage,
-            tint = Accent,
-            inverse = true
-        )
-        MonitorMetricCard(
-            title = "Оперативная память",
-            value = memory?.let { formatStorageBytes(context, it.first) } ?: "Проверка…",
-            subtitle = memory?.let { "Свободно из " + formatStorageBytes(context, it.second) } ?: "Показатель доступной RAM",
-            fraction = 1f - animatedMemory,
-            tint = Peach
-        )
-        MonitorMetricCard(
-            title = "Аккумулятор",
-            value = battery?.let { "${it.percent}%" } ?: "Нет данных",
-            subtitle = battery?.let {
-                buildString {
-                    append(if (it.charging) "Заряжается" else "Работает от батареи")
-                    it.temperatureC?.let { temp -> append(" · батарея ${String.format(Locale.getDefault(), "%.1f", temp)} °C") }
+    Column(verticalArrangement = Arrangement.spacedBy(17.dp)) {
+        ScreenHeading("DEVICE ANALYTICS / 03", "Мониторинг", "Живые показатели телефона и динамика изменений.")
+
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(29.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF315C64), Color(0xFF213D48), Color(0xFF1A2A33))))
+                .border(1.dp, Color(0xFF8EDCE0).copy(alpha = .20f), RoundedCornerShape(29.dp))
+                .padding(19.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("СИСТЕМНЫЙ ПУЛЬС", color = Color(0xFFB7E7E6), fontSize = 10.sp, letterSpacing = 1.8.sp)
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Box(Modifier.size(6.dp).clip(RoundedCornerShape(50)).background(Accent))
+                    Text("LIVE", color = Accent, fontSize = 9.sp, letterSpacing = 1.sp)
                 }
-            } ?: "Системная информация недоступна",
-            fraction = (battery?.percent ?: 0).coerceIn(0, 100) / 100f,
-            tint = Coral
-        )
+            }
+            Text("Телефон под наблюдением", color = Color.White, fontSize = 22.sp)
+            Text("Собираем системные значения, пока открыт этот экран.", color = Color.White.copy(alpha = .65f), fontSize = 11.sp, lineHeight = 16.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).background(Color.White.copy(alpha = .07f)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("RAM", color = Color(0xFFF1D3A8), fontSize = 9.sp, letterSpacing = 1.sp)
+                    Text(memory?.let { formatStorageBytes(context, it.first) } ?: "—", color = Color.White, fontSize = 17.sp)
+                    Text("доступно", color = Muted, fontSize = 9.sp)
+                }
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).background(Color.White.copy(alpha = .07f)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("BATTERY", color = Color(0xFFFFAFA5), fontSize = 9.sp, letterSpacing = 1.sp)
+                    Text(battery?.let { it.percent.toString() + "%" } ?: "—", color = Color.White, fontSize = 17.sp)
+                    Text(battery?.let { if (it.charging) "заряжается" else "без зарядки" } ?: "нет данных", color = Muted, fontSize = 9.sp)
+                }
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).background(Color.White.copy(alpha = .07f)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("THERMAL", color = Color(0xFFB5E5D1), fontSize = 9.sp, letterSpacing = 1.sp)
+                    Text(thermal, color = Color.White, fontSize = 12.sp, lineHeight = 15.sp)
+                    Text("система", color = Muted, fontSize = 9.sp)
+                }
+            }
+            Text("Обновлений экрана: " + refreshTick + " · интервал 15 сек", color = Color.White.copy(alpha = .48f), fontSize = 9.sp)
+        }
+
+        ScreenSectionLabel("ТЕКУЩИЕ РЕСУРСЫ")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                Modifier.weight(1f).clip(RoundedCornerShape(22.dp)).background(Color(0xFF24363A))
+                    .border(1.dp, Color.White.copy(alpha = .06f), RoundedCornerShape(22.dp)).padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("ХРАНИЛИЩЕ", color = Accent, fontSize = 9.sp, letterSpacing = 1.1.sp)
+                Text(stats?.let { formatStorageBytes(context, it.freeBytes) } ?: "—", color = Color.White, fontSize = 21.sp)
+                Text("свободно из " + (stats?.let { formatStorageBytes(context, it.totalBytes) } ?: "—"), color = Muted, fontSize = 10.sp)
+                Box(Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = .22f))) {
+                    Box(Modifier.fillMaxWidth((1f - animatedStorage).coerceIn(.015f, 1f)).height(7.dp).clip(RoundedCornerShape(20.dp)).background(Brush.horizontalGradient(listOf(Accent, Color(0xFF83D6BE)))))
+                }
+                Text((animatedStorage * 100).toInt().toString() + "% занято", color = Muted, fontSize = 9.sp)
+            }
+            Column(
+                Modifier.weight(1f).clip(RoundedCornerShape(22.dp)).background(Color(0xFF2D3039))
+                    .border(1.dp, Color.White.copy(alpha = .06f), RoundedCornerShape(22.dp)).padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("ОПЕРАТИВНАЯ ПАМЯТЬ", color = Peach, fontSize = 9.sp, letterSpacing = .7.sp)
+                Text(memory?.let { formatStorageBytes(context, it.first) } ?: "—", color = Color.White, fontSize = 21.sp)
+                Text("доступно из " + (memory?.let { formatStorageBytes(context, it.second) } ?: "—"), color = Muted, fontSize = 10.sp)
+                Box(Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = .22f))) {
+                    Box(Modifier.fillMaxWidth((1f - animatedMemory).coerceIn(.015f, 1f)).height(7.dp).clip(RoundedCornerShape(20.dp)).background(Brush.horizontalGradient(listOf(Peach, Coral))))
+                }
+                Text((animatedMemory * 100).toInt().toString() + "% используется", color = Muted, fontSize = 9.sp)
+            }
+        }
+
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Color(0xFF302B31)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("АККУМУЛЯТОР", color = Coral, fontSize = 9.sp, letterSpacing = 1.2.sp)
+                Text(battery?.let { it.percent.toString() + "%" } ?: "—", color = Color.White, fontSize = 18.sp)
+            }
+            Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(30.dp)).background(Color.Black.copy(alpha = .22f))) {
+                Box(Modifier.fillMaxWidth(((battery?.percent ?: 0).coerceIn(0, 100) / 100f).coerceAtLeast(.01f)).height(8.dp).clip(RoundedCornerShape(30.dp)).background(Brush.horizontalGradient(listOf(Coral, Peach))))
+            }
+            Text(battery?.let {
+                (if (it.charging) "Заряжается" else "Работает от батареи") +
+                    (it.temperatureC?.let { temp -> " · " + String.format(Locale.getDefault(), "%.1f", temp) + " °C" } ?: "")
+            } ?: "Системная информация недоступна", color = Muted, fontSize = 11.sp)
+        }
+
         FeatureCard(
             "Тепловое состояние",
             thermal,
@@ -1199,15 +1302,17 @@ private fun Monitoring(context: Context) {
                 else -> Accent
             }
         )
-        ScreenSectionLabel("ИСТОРИЯ ПОКАЗАТЕЛЕЙ")
-        TrendLineChart("Загрузка RAM", ramHistory, Peach)
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                ScreenSectionLabel("ИСТОРИЯ ИЗМЕНЕНИЙ")
+                Text("Динамика системы", color = Color.White, fontSize = 20.sp)
+            }
+            Text("● REC", color = Accent, fontSize = 9.sp, letterSpacing = 1.sp)
+        }
+        TrendLineChart("Использование оперативной памяти", ramHistory, Peach)
         TrendLineChart("Заполнение хранилища", storageHistory, Accent)
-        Text(
-            "Графики собирают точки только пока открыт экран мониторинга. После закрытия приложения сбор останавливается.",
-            color = Muted,
-            fontSize = 10.sp,
-            lineHeight = 15.sp
-        )
+        InfoCard("Как читаются графики", "История собирает точки каждые 15 секунд только пока открыт экран мониторинга. После выхода сбор приостанавливается; значения берутся из Android, а не моделируются.")
     }
 }
 
@@ -1319,129 +1424,131 @@ private fun Settings(context: Context) {
 
     val lastRun = remember(refreshToken) { prefs.getLong("auto_clean_last_run", 0L) }
     val lastFreed = remember(refreshToken) { prefs.getLong("auto_clean_last_freed_estimate", 0L) }
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        ScreenHeading("PERSONAL CONTROL", "Настройки", "Подстрой приложение под свой телефон — остальное оно сделает само.")
-        InfoCard(
-            "Автопилот устройства",
-            "Включи расписание, чтобы ProjectOptimizer сам запускал безопасную очистку доступных временных файлов."
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !hasAccess) {
-            PrimaryActionButton("Выдать разрешение Android", onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth())
-            InfoCard(
-                "Нужно системное разрешение",
-                "Android откроет собственный экран специального доступа. Включи «Разрешить доступ к управлению всеми файлами» и вернись сюда."
-            )
-        } else {
-            FeatureCard("Доступ к файлам", "Разрешение предоставлено. Доступны только те файлы и каталоги, которые разрешает Android.", Accent)
-        }
+    Column(verticalArrangement = Arrangement.spacedBy(17.dp)) {
+        ScreenHeading("CONTROL CENTER / 04", "Настройки", "Настрой автоматический уход и поведение приложения.")
 
-        SettingToggle(
-            "Включить автоочистку",
-            "Запуск в фоне по выбранному расписанию. Android может немного сдвигать время.",
-            enabled
-        ) { checked ->
-            enabled = checked
-            prefs.edit().putBoolean("auto_clean_enabled", checked).apply()
-            if (checked && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
-            else cancelAutoClean(context)
-        }
-
-        if (enabled) {
-            ScreenSectionLabel("ИНТЕРВАЛ АВТООЧИСТКИ")
-            Text(
-                "Повторять: " + when (intervalMinutes) {
-                    30 -> "каждые 30 минут"
-                    60 -> "каждый час"
-                    120 -> "каждые 2 часа"
-                    360 -> "каждые 6 часов"
-                    720 -> "каждые 12 часов"
-                    1440 -> "раз в сутки"
-                    4320 -> "раз в 3 дня"
-                    10080 -> "раз в 7 дней"
-                    else -> "каждые $intervalMinutes минут"
-                },
-                color = Color.White,
-                fontSize = 17.sp
-            )
-            val intervalOptions = listOf(
-                30 to "30 мин", 60 to "1 час", 120 to "2 часа", 360 to "6 часов",
-                720 to "12 часов", 1440 to "24 часа", 4320 to "3 дня", 10080 to "7 дней"
-            )
-            intervalOptions.chunked(4).forEach { group ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    group.forEach { (minutes, label) ->
-                        val selected = intervalMinutes == minutes
-                        androidx.compose.material3.Surface(
-                            onClick = {
-                                intervalMinutes = minutes
-                                prefs.edit().putInt("auto_clean_interval_minutes", minutes).apply()
-                                if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
-                            },
-                            modifier = Modifier.weight(1f),
-                            color = if (selected) Accent.copy(alpha = 0.18f) else Panel,
-                            shape = RoundedCornerShape(15.dp),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (selected) Accent else Color.White.copy(alpha = 0.07f)
-                            )
-                        ) {
-                            Text(
-                                label,
-                                Modifier.padding(vertical = 13.dp, horizontal = 3.dp),
-                                color = if (selected) Accent else Color.White,
-                                fontSize = 11.sp,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                        }
-                    }
-                    repeat(4 - group.size) { Spacer(Modifier.weight(1f)) }
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(29.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF485F50), Color(0xFF2B413D), Color(0xFF1D2D32))))
+                .border(1.dp, Color(0xFFB3D6B7).copy(alpha = .20f), RoundedCornerShape(29.dp))
+                .padding(19.dp),
+            verticalArrangement = Arrangement.spacedBy(13.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("OPTIMIZER / CONTROL", color = Color(0xFFCBE8C9), fontSize = 10.sp, letterSpacing = 1.8.sp)
+                Box(Modifier.clip(RoundedCornerShape(30.dp)).background(if (enabled) Accent.copy(alpha = .18f) else Color.White.copy(alpha = .08f)).padding(horizontal = 10.dp, vertical = 6.dp)) {
+                    Text(if (enabled) "АВТОПИЛОТ ON" else "АВТОПИЛОТ OFF", color = if (enabled) Accent else Muted, fontSize = 9.sp, letterSpacing = .8.sp)
                 }
             }
-            InfoCard(
-                "Как работает интервал",
-                "После включения очистка будет запускаться с выбранной периодичностью. Android может задержать фоновую задачу из-за энергосбережения или нагрузки."
-            )
-
-            ScreenSectionLabel("ЧТО ОЧИЩАТЬ")
-            SettingToggle("Кэш Project Optimizer", "Временные файлы самого оптимизатора.", cleanAppCache) { checked ->
-                cleanAppCache = checked
-                prefs.edit().putBoolean("auto_clean_app_cache", checked).apply()
-                if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
-                else if (enabled) cancelAutoClean(context)
+            Text("Твой телефон.\nТвои правила.", color = Color.White, fontSize = 25.sp, lineHeight = 29.sp)
+            Text("Безопасная автоочистка работает по расписанию, а ты выбираешь, что именно можно удалять.", color = Color.White.copy(alpha = .68f), fontSize = 12.sp, lineHeight = 18.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(17.dp)).background(Color.White.copy(alpha = .07f)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("ИНТЕРВАЛ", color = Color(0xFFCBE8C9), fontSize = 9.sp, letterSpacing = 1.sp)
+                    Text(if (enabled) when (intervalMinutes) { 30 -> "30 мин"; 60 -> "1 час"; 120 -> "2 часа"; 360 -> "6 часов"; 720 -> "12 часов"; 1440 -> "1 день"; 4320 -> "3 дня"; 10080 -> "7 дней"; else -> intervalMinutes.toString() + " мин" } else "Выключен", color = Color.White, fontSize = 16.sp)
+                }
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(17.dp)).background(Color.White.copy(alpha = .07f)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("ПОСЛЕДНИЙ ЗАПУСК", color = Color(0xFFCBE8C9), fontSize = 9.sp, letterSpacing = .8.sp)
+                    Text(if (lastRun > 0L) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(lastRun)) else "Пока нет", color = Color.White, fontSize = 12.sp, maxLines = 2)
+                }
             }
+        }
+
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(23.dp)).background(Panel).padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            ScreenSectionLabel("РАЗРЕШЕНИЯ")
+            Text("Связь с Android", color = Color.White, fontSize = 17.sp)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !hasAccess) {
+                FeatureCard("Доступ к файлам не выдан", "Для поиска временных файлов Android требует специальное разрешение.", Coral)
+                PrimaryActionButton("Открыть системные разрешения", onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth())
+            } else {
+                FeatureCard("Доступ к файлам активен", "Приложение видит только те общие файлы и каталоги, которые разрешает Android.", Accent)
+            }
+        }
+
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(23.dp)).background(Color(0xFF202D32)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ScreenSectionLabel("АВТОПИЛОТ")
+            Text("Автоматический уход", color = Color.White, fontSize = 18.sp)
+            Text("Планировщик очищает только разрешённые временные файлы и кэш самого Project Optimizer. Android может немного сдвигать время запуска.", color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
             SettingToggle(
-                "Временные и мусорные файлы",
-                "Старые .tmp, .temp, .part и файлы из папок temp/tmp/cache старше 14 дней.",
-                cleanTempFiles
+                "Включить автоочистку",
+                "Работа в фоне по выбранному расписанию.",
+                enabled
             ) { checked ->
-                cleanTempFiles = checked
-                prefs.edit().putBoolean("auto_clean_temp_files", checked).apply()
-                if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
-                else if (enabled) cancelAutoClean(context)
+                enabled = checked
+                prefs.edit().putBoolean("auto_clean_enabled", checked).apply()
+                if (checked && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context) else cancelAutoClean(context)
             }
-            if (!cleanAppCache && !cleanTempFiles) {
-                InfoCard("Нечего очищать", "Включи хотя бы один тип очистки, чтобы расписание могло работать.")
+            if (enabled) {
+                ScreenSectionLabel("ЧАСТОТА ЗАПУСКА")
+                Text("Повторять: " + when (intervalMinutes) {
+                    30 -> "каждые 30 минут"; 60 -> "каждый час"; 120 -> "каждые 2 часа"; 360 -> "каждые 6 часов"
+                    720 -> "каждые 12 часов"; 1440 -> "раз в сутки"; 4320 -> "раз в 3 дня"; 10080 -> "раз в 7 дней"
+                    else -> "каждые " + intervalMinutes + " минут"
+                }, color = Color.White, fontSize = 16.sp)
+                val intervalOptions = listOf(
+                    30 to "30 мин", 60 to "1 час", 120 to "2 часа", 360 to "6 часов",
+                    720 to "12 часов", 1440 to "24 часа", 4320 to "3 дня", 10080 to "7 дней"
+                )
+                intervalOptions.chunked(4).forEach { group ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        group.forEach { (minutes, label) ->
+                            val selected = intervalMinutes == minutes
+                            androidx.compose.material3.Surface(
+                                onClick = {
+                                    intervalMinutes = minutes
+                                    prefs.edit().putInt("auto_clean_interval_minutes", minutes).apply()
+                                    if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
+                                },
+                                modifier = Modifier.weight(1f),
+                                color = if (selected) Accent.copy(alpha = .18f) else Color(0xFF2B3A3F),
+                                shape = RoundedCornerShape(14.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) Accent else Color.White.copy(alpha = .07f))
+                            ) {
+                                Text(label, Modifier.padding(vertical = 13.dp, horizontal = 3.dp), color = if (selected) Accent else Color.White, fontSize = 10.sp, textAlign = TextAlign.Center)
+                            }
+                        }
+                        repeat(4 - group.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+                ScreenSectionLabel("ЧТО МОЖНО ОЧИЩАТЬ")
+                SettingToggle("Кэш Project Optimizer", "Временные файлы самого оптимизатора.", cleanAppCache) { checked ->
+                    cleanAppCache = checked
+                    prefs.edit().putBoolean("auto_clean_app_cache", checked).apply()
+                    if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context) else if (enabled) cancelAutoClean(context)
+                }
+                SettingToggle("Временные и мусорные файлы", "Старые .tmp, .temp, .part и известные temp/tmp/cache папки старше 14 дней.", cleanTempFiles) { checked ->
+                    cleanTempFiles = checked
+                    prefs.edit().putBoolean("auto_clean_temp_files", checked).apply()
+                    if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context) else if (enabled) cancelAutoClean(context)
+                }
+                if (!cleanAppCache && !cleanTempFiles) FeatureCard("Очистка не настроена", "Включи хотя бы один тип файлов, чтобы расписание выполняло полезную работу.", Coral)
             }
         }
 
-        ScreenSectionLabel("ОСНОВНЫЕ НАСТРОЙКИ")
-        SettingToggle(
-            "Подсказки на главной",
-            "Показывать карточки с советами по уходу за телефоном.",
-            showTips
-        ) { checked ->
-            showTips = checked
-            prefs.edit().putBoolean("show_optimizer_tips", checked).apply()
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(23.dp)).background(Color(0xFF242D35)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            ScreenSectionLabel("ПЕРСОНАЛИЗАЦИЯ")
+            Text("Как ведёт себя приложение", color = Color.White, fontSize = 17.sp)
+            SettingToggle(
+                "Подсказки на главной",
+                "Показывать карточки с короткими советами по уходу за телефоном.",
+                showTips
+            ) { checked ->
+                showTips = checked
+                prefs.edit().putBoolean("show_optimizer_tips", checked).apply()
+            }
         }
 
-        ScreenSectionLabel("ИСТОРИЯ ОЧИСТКИ")
-        InfoCard(
-            "Последняя очистка",
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(23.dp)).background(Color(0xFF1E2B30)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ScreenSectionLabel("ЖУРНАЛ ОБСЛУЖИВАНИЯ")
+            Text("История очистки", color = Color.White, fontSize = 18.sp)
             if (lastRun > 0L) {
-                "Выполнена: " + java.text.DateFormat.getDateTimeInstance().format(java.util.Date(lastRun)) + "\n" +
-                    "Оценочно удалено: " + formatStorageBytes(context, lastFreed)
-            } else "Автоматическая очистка ещё не запускалась."
-        )
+                Text(java.text.DateFormat.getDateTimeInstance().format(java.util.Date(lastRun)), color = Accent, fontSize = 13.sp)
+                Text("Оценочно освобождено: " + formatStorageBytes(context, lastFreed), color = Color.White, fontSize = 13.sp)
+            } else {
+                Text("Автоматическая очистка ещё не запускалась.", color = Muted, fontSize = 12.sp)
+            }
+        }
+        InfoCard("Никаких скрытых обещаний", "Приложение не управляет закрытыми системными процессами и не удаляет личные данные автоматически. Все правила очистки можно изменить здесь.")
     }
 }
 @Composable

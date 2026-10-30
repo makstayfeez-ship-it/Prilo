@@ -2,7 +2,7 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ "main", "feature/full-game-center-and-polish" ]
+    branches: [ "main", "feature/full-game-center-and-polish", "redesign/full-app-experience", "redesign/full-app-experience-v2" ]
   workflow_dispatch:
 
 permissions:
