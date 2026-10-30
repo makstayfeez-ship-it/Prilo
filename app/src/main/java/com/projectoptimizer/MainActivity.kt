@@ -496,11 +496,15 @@ private fun clearOwnAppCache(context: Context): Long {
  // который Android показывает в разделе «Хранилище» и где лежат DCIM,
  // Downloads, Pictures и другие пользовательские файлы.
  // StatFs возвращает реальные значения файловой системы, не оценку.
+// Android StorageStatsManager предназначен для отображения пользователю
+// общей ёмкости физического носителя и свободного места, включая кэш,
+// который система может освободить. UUID определяем по внутреннему data-разделу.
 private fun storageStats(context: Context): Pair<Long, Long> = runCatching {
-    val primaryStorage = Environment.getExternalStorageDirectory()
-    val stat = StatFs(primaryStorage.absolutePath)
-    val total = stat.totalBytes.coerceAtLeast(0L)
-    val free = stat.availableBytes.coerceIn(0L, total)
+    val storageManager = context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
+    val statsManager = context.getSystemService(Context.STORAGE_STATS_SERVICE) as StorageStatsManager
+    val storageUuid = storageManager.getUuidForPath(Environment.getDataDirectory())
+    val total = statsManager.getTotalBytes(storageUuid).coerceAtLeast(0L)
+    val free = statsManager.getFreeBytes(storageUuid).coerceIn(0L, total)
     total to free
 }.getOrElse { 0L to 0L }
 
