@@ -39,6 +39,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -153,163 +154,137 @@ private fun Dashboard(context: Context) {
 @Composable
 private fun Cleaning(context: Context) {
     val prefs = remember { context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE) }
-    var hasAllFilesAccess by remember { mutableStateOf(hasStorageAccess(context)) }
+    var hasAccess by remember { mutableStateOf(hasStorageAccess(context)) }
     DisposableEffect(context) {
         val lifecycle = (context as? ComponentActivity)?.lifecycle
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) hasAllFilesAccess = hasStorageAccess(context)
-        }
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) hasAccess = hasStorageAccess(context) }
         lifecycle?.addObserver(observer)
         onDispose { lifecycle?.removeObserver(observer) }
     }
     var files by remember { mutableStateOf<List<ScannedFile>>(emptyList()) }
     var scanning by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
     var scanned by remember { mutableStateOf(false) }
-    var showDeleteDialog by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf("Выбери папку, которую нужно проверить.") }
+    var showLocked by remember { mutableStateOf(false) }
+    var showDialog by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("Нажми «Найти файлы», чтобы проверить хранилище.") }
+    var foundCount by remember { mutableIntStateOf(0) }
+    var limit by remember { mutableIntStateOf(100) }
+    var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var locked by remember { mutableStateOf(prefs.getStringSet("locked_uris", emptySet())?.toSet() ?: emptySet()) }
     var allowGif by remember { mutableStateOf(prefs.getBoolean("allow_gif", true)) }
-    var allowDuplicates by remember { mutableStateOf(prefs.getBoolean("allow_duplicates", true)) }
-    var allowOld by remember { mutableStateOf(prefs.getBoolean("allow_old", false)) }
     var allowArchives by remember { mutableStateOf(prefs.getBoolean("allow_archives", false)) }
-    var lockedUris by remember { mutableStateOf(prefs.getStringSet("locked_uris", emptySet())?.toSet() ?: emptySet()) }
+    var allowOld by remember { mutableStateOf(prefs.getBoolean("allow_old", false)) }
+    var allowDuplicates by remember { mutableStateOf(prefs.getBoolean("allow_duplicates", true)) }
     var oldDays by remember { mutableIntStateOf(prefs.getInt("old_days", 180).coerceIn(7, 730)) }
+    var cacheFreeBefore by remember { mutableLongStateOf(-1L) }
+    var lastDeleted by remember { mutableStateOf("Пока ничего не удалено.") }
     val scope = rememberCoroutineScope()
-    val cacheClearLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        status = if (result.resultCode == android.app.Activity.RESULT_OK)
-            "Системная очистка кэша завершена."
-        else "Системная очистка кэша отменена или не выполнена."
+    val cacheLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        val freeNow = storageStats(context).second
+        val gained = if (cacheFreeBefore >= 0) (freeNow - cacheFreeBefore).coerceAtLeast(0) else 0L
+        status = if (gained > 0) "После системного запроса свободного места стало больше на ${formatBytes(gained)}." else "Android вернул управление, но прирост свободного места не обнаружен. Система могла не выполнить очистку."
+        cacheFreeBefore = -1L
     }
-    val protectedKinds = setOf(FileKind.PHOTO, FileKind.VIDEO, FileKind.AUDIO)
-    val duplicateUris = remember(files) {
-        files.filter { it.size > 0 && it.sha256 != null }.groupBy { it.sha256 }.values
-            .filter { it.size > 1 }.flatMap { it.drop(1) }.map { it.uri }.toSet()
-    }
-    val oldCutoff = System.currentTimeMillis() / 1000 - oldDays.toLong() * 24 * 60 * 60
-    val candidates = files.filter { file ->
-        file.kind !in protectedKinds && file.uri.toString() !in lockedUris && (
-            (allowGif && file.kind == FileKind.GIF) ||
-            (allowArchives && file.kind == FileKind.ARCHIVE) ||
-            (allowDuplicates && file.uri in duplicateUris) ||
-            (allowOld && file.modified > 0 && file.modified < oldCutoff)
-        )
-    }
-    val reclaimable = candidates.sumOf { it.size }
-
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Удалить выбранные файлы?") },
-            text = { Text("Будет удалено файлов: ${candidates.size}. Освободится примерно ${formatBytes(reclaimable)}. Фото, видео и аудио защищены. Отменить удаление после подтверждения может быть невозможно.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showDeleteDialog = false
-                    scope.launch {
-                        val deleted = withContext(Dispatchers.IO) {
-                            candidates.count { runCatching {
-                                it.uri.path?.let { path -> java.io.File(path).delete() } == true
-                            }.getOrDefault(false) }
-                        }
-                        status = "Удалено файлов: $deleted. Запусти проверку ещё раз для обновления."
-                        scanned = false
+    val protected = setOf(FileKind.PHOTO, FileKind.VIDEO, FileKind.AUDIO)
+    val duplicates = remember(files) { files.filter { it.sha256 != null && it.size > 0 }.groupBy { it.sha256 }.values.filter { it.size > 1 }.flatMap { it.drop(1) }.map { it.uri }.toSet() }
+    val cutoff = System.currentTimeMillis() / 1000 - oldDays.toLong() * 86400L
+    val eligible = files.filter { file -> file.kind !in protected && file.uri.toString() !in locked && ((allowGif && file.kind == FileKind.GIF) || (allowArchives && file.kind == FileKind.ARCHIVE) || (allowDuplicates && file.uri in duplicates) || (allowOld && file.modified > 0 && file.modified < cutoff)) }
+    val selectedFiles = files.filter { it.uri.toString() in selected && it.uri.toString() !in locked && it.kind !in protected }
+    val selectedBytes = selectedFiles.sumOf { it.size }
+    val visible = if (showLocked) files.filter { it.uri.toString() in locked } else files
+    if (showDialog) AlertDialog(
+        onDismissRequest = { showDialog = false },
+        title = { Text("Подтвердить очистку") },
+        text = { Text("Выбрано файлов: ${selectedFiles.size}. Освободится примерно ${formatBytes(selectedBytes)}. Фото, видео, аудио и файлы под замком защищены.") },
+        confirmButton = { TextButton(onClick = {
+            showDialog = false
+            deleting = true
+            scope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    var count = 0; var bytes = 0L; val removed = mutableSetOf<String>()
+                    selectedFiles.forEach { file ->
+                        val target = file.uri.path?.let { java.io.File(it) }
+                        if (target != null && runCatching { target.delete() }.getOrDefault(false)) { count++; bytes += file.size; removed.add(file.uri.toString()) }
                     }
-                }) { Text("Удалить") }
-            },
-            dismissButton = { TextButton(onClick = { showDeleteDialog = false }) { Text("Отмена") } }
-        )
-    }
-
+                    Triple(count, bytes, removed)
+                }
+                files = files.filterNot { it.uri.toString() in result.third }
+                selected = selected - result.third
+                lastDeleted = "Удалено ${result.first} файлов · освобождено ${formatBytes(result.second)}"
+                status = "Очистка завершена. ${lastDeleted}"
+                deleting = false
+            }
+        }) { Text("Удалить выбранное") } },
+        dismissButton = { TextButton(onClick = { showDialog = false }) { Text("Отмена") } }
+    )
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         val stats = storageStats(context)
-        InfoCard("Память телефона", "Всего: ${formatBytes(stats.first)}\nСвободно: ${formatBytes(stats.second)}\nЗанято: ${formatBytes((stats.first - stats.second).coerceAtLeast(0))}")
-        if (!hasAllFilesAccess) {
-            Button(onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth()) {
-                Text("Разрешить доступ ко всем файлам")
+        InfoCard("Память телефона", "Всего: ${formatBytes(stats.first)}\nЗанято: ${formatBytes((stats.first - stats.second).coerceAtLeast(0))}\nСвободно: ${formatBytes(stats.second)}")
+        if (!hasAccess) {
+            Button(onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth()) { Text("Разрешить доступ ко всем файлам") }
+            InfoCard("Доступ Android", "Включи специальное разрешение в системных настройках и вернись в приложение.")
+        } else InfoCard("Доступ предоставлен", "Проверяется доступное общее хранилище. Закрытые системные каталоги Android могут быть недоступны.")
+        Button(enabled = hasAccess && !scanning && !deleting, onClick = {
+            scanning = true; scanned = false; showLocked = false; foundCount = 0; selected = emptySet(); status = "Идёт поиск файлов…"
+            scope.launch {
+                val result = withContext(Dispatchers.IO) { scanAllFiles { n -> if (n % 100 == 0) scope.launch(Dispatchers.Main) { foundCount = n } } }
+                files = result
+                selected = result.filter { file -> file.kind !in protected && ((allowGif && file.kind == FileKind.GIF) || (allowArchives && file.kind == FileKind.ARCHIVE) || (allowOld && file.modified > 0 && file.modified < cutoff)) }.map { it.uri.toString() }.toSet()
+                limit = 100; scanned = true; scanning = false
+                status = "Поиск завершён. Найдено файлов: ${result.size}. Проверь список и отметь нужное."
             }
-            InfoCard("Разрешение Android", "Откроются системные настройки специального доступа. Включи «Разрешить доступ для управления всеми файлами», затем вернись сюда.")
-        } else {
-            InfoCard("Доступ предоставлен", "Сканируется общее пользовательское хранилище без ручного выбора папки.")
-        }
-        Button(
-            enabled = hasAllFilesAccess && !scanning,
-            onClick = {
-                scanning = true
-                status = "Проверяю доступные файлы общего хранилища…"
-                scope.launch {
-                    val result = withContext(Dispatchers.IO) { scanAllFiles() }
-                    files = result
-                    scanned = true
-                    scanning = false
-                    status = "Проверка завершена. Найдено файлов: ${result.size}. Некоторые защищённые каталоги недоступны Android."
-                }
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) { Text(if (scanning) "Идёт проверка…" else "Проверить всё хранилище") }
+        }, modifier = Modifier.fillMaxWidth()) { Text(if (scanning) "Идёт поиск…" else "Найти файлы") }
+        if (scanning || deleting) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(if (scanning) "Поиск файлов · найдено: $foundCount" else "Удаление выбранных файлов…", color = Accent) }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Button(
-                enabled = hasAllFilesAccess,
-                onClick = { cacheClearLauncher.launch(Intent(StorageManager.ACTION_CLEAR_APP_CACHE)) },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Очистить кэш приложений через Android") }
-            InfoCard("Очистка кэша", "Android покажет системное подтверждение. Кэш очищается средствами системы, закрытые данные приложений не затрагиваются.")
-        } else {
-            Button(onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_SETTINGS)) } },
-                modifier = Modifier.fillMaxWidth()) { Text("Открыть управление хранилищем") }
+            Button(enabled = hasAccess && !scanning && !deleting, onClick = {
+                cacheFreeBefore = storageStats(context).second
+                status = "Запрашиваю системную очистку кэша…"
+                runCatching { cacheLauncher.launch(Intent(StorageManager.ACTION_CLEAR_APP_CACHE)) }.onFailure { status = "Не удалось запустить очистку Android: ${it.message ?: "ошибка"}"; cacheFreeBefore = -1L }
+            }, modifier = Modifier.fillMaxWidth()) { Text("Запросить очистку кэша Android") }
+            InfoCard("Кэш приложений", "Закрытый кэш других приложений может очищать только Android. После возврата приложение сравнит свободное место и покажет фактический прирост.")
         }
-        InfoCard("Результат анализа", status)
+        InfoCard("Состояние", status)
+        Text(lastDeleted, color = Accent, fontSize = 13.sp)
         if (scanned) {
-            MetricCard("Можно освободить по текущим правилам", formatBytes(reclaimable), Modifier.fillMaxWidth())
-            Text("Найдено кандидатов: ${candidates.size}", color = Color.White)
-            Button(
-                enabled = candidates.isNotEmpty(),
-                onClick = { showDeleteDialog = true },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Удалить безопасно отобранное") }
-            Text("Найденные файлы — можно поставить под замок", color = Color.White, fontSize = 15.sp)
-            candidates.take(40).forEach { file ->
-                SettingToggle(
-                    file.name,
-                    formatBytes(file.size) + " · " + file.location,
-                    file.uri.toString() in lockedUris
-                ) { locked ->
-                    lockedUris = if (locked) lockedUris + file.uri.toString()
-                        else lockedUris - file.uri.toString()
-                    prefs.edit().putStringSet("locked_uris", lockedUris).apply()
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { showLocked = false }, modifier = Modifier.weight(1f)) { Text("Найденные (${files.size})") }
+                Button(onClick = { showLocked = true }, modifier = Modifier.weight(1f)) { Text("Под замком (${locked.size})") }
+            }
+            if (!showLocked) {
+                Text("Выбрано: ${selectedFiles.size} · ${formatBytes(selectedBytes)}", color = Accent)
+                Button(enabled = selectedFiles.isNotEmpty() && !deleting, onClick = { showDialog = true }, modifier = Modifier.fillMaxWidth()) { Text("Очистить выбранное") }
+            } else Text("Эти файлы исключены из очистки. Сними замок, чтобы вернуть их в общий список.", color = Muted, fontSize = 12.sp)
+            visible.take(limit).forEach { file ->
+                val key = file.uri.toString(); val isLocked = key in locked; val isProtected = file.kind in protected
+                Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(14.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(10.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column(Modifier.weight(1f)) {
+                                Text(file.name, color = Color.White, fontSize = 13.sp)
+                                Text("${formatBytes(file.size)} · ${file.kind.title}", color = Muted, fontSize = 11.sp)
+                                Text(file.location, color = Muted, fontSize = 10.sp)
+                            }
+                            if (!showLocked && !isProtected && !isLocked) Checkbox(checked = key in selected, onCheckedChange = { yes -> selected = if (yes) selected + key else selected - key })
+                        }
+                        TextButton(onClick = { locked = if (isLocked) locked - key else locked + key; prefs.edit().putStringSet("locked_uris", locked).apply(); if (!isLocked) selected = selected - key }) { Text(if (isLocked) "Снять замок" else "Поставить под замок") }
+                    }
                 }
             }
-            if (candidates.size > 40) {
-                Text("Показаны первые 40 из " + candidates.size + ". Остальные также учитываются в расчёте.", color = Muted, fontSize = 12.sp)
-            }
+            if (visible.size > limit) Button(onClick = { limit += 100 }, modifier = Modifier.fillMaxWidth()) { Text("Показать ещё (${visible.size - limit})") }
+            if (visible.isEmpty()) InfoCard("Пусто", if (showLocked) "Нет файлов под замком." else "Файлы не найдены.")
         }
-        InfoCard("Защита по умолчанию", "Фото, видео и аудио всегда исключены из удаления. Даже если они попали в выбранную папку, очистка их не тронет.")
-        Text("Что разрешено искать и удалять", color = Color.White, fontSize = 16.sp)
-        SettingToggle("GIF-файлы", "Разрешить включать GIF в очистку", allowGif) {
-            allowGif = it; prefs.edit().putBoolean("allow_gif", it).apply()
-        }
-        SettingToggle("Архивы и установочные файлы", "ZIP, RAR, 7Z, TAR, GZ и установочные пакеты", allowArchives) {
-            allowArchives = it; prefs.edit().putBoolean("allow_archives", it).apply()
-        }
-        SettingToggle("Повторяющиеся файлы", "Одинаковый размер — предварительный признак; перед удалением нужно проверить копии", allowDuplicates) {
-            allowDuplicates = it; prefs.edit().putBoolean("allow_duplicates", it).apply()
-        }
-        SettingToggle("Старые файлы", "Файлы, к которым давно не обращались", allowOld) {
-            allowOld = it; prefs.edit().putBoolean("allow_old", it).apply()
-        }
+        Text("Правила поиска", color = Color.White, fontSize = 16.sp)
+        SettingToggle("GIF-файлы", "Автоматически отмечать GIF", allowGif) { allowGif = it; prefs.edit().putBoolean("allow_gif", it).apply() }
+        SettingToggle("Архивы и установочные файлы", "ZIP, RAR, 7Z, TAR, GZ, APK и другие", allowArchives) { allowArchives = it; prefs.edit().putBoolean("allow_archives", it).apply() }
+        SettingToggle("Повторяющиеся файлы", "Точные копии по SHA-256", allowDuplicates) { allowDuplicates = it; prefs.edit().putBoolean("allow_duplicates", it).apply() }
+        SettingToggle("Старые файлы", "Автоматически отмечать файлы старше срока", allowOld) { allowOld = it; prefs.edit().putBoolean("allow_old", it).apply() }
         Text("Считать старыми через: $oldDays дней", color = Muted, fontSize = 13.sp)
-        androidx.compose.material3.Slider(
-            value = oldDays.toFloat(),
-            onValueChange = { oldDays = it.toInt().coerceIn(7, 730) },
-            onValueChangeFinished = { prefs.edit().putInt("old_days", oldDays).apply() },
-            valueRange = 7f..730f
-        )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("7 дней", color = Muted, fontSize = 11.sp)
-            Text("730 дней", color = Muted, fontSize = 11.sp)
-        }
-        InfoCard("Ограничения Android", "Даже с этим разрешением Android закрывает часть системных каталогов, включая приватные данные приложений и некоторые папки Android/data и Android/obb.")
-        InfoCard("Проверка дубликатов", "Дубликаты сравниваются по SHA-256 содержимого, а не только по размеру. Для защиты оставляется возможность вручную проверить список перед удалением.")
+        androidx.compose.material3.Slider(value = oldDays.toFloat(), onValueChange = { oldDays = it.toInt().coerceIn(7, 730) }, onValueChangeFinished = { prefs.edit().putInt("old_days", oldDays).apply() }, valueRange = 7f..730f)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("7 дней", color = Muted, fontSize = 11.sp); Text("730 дней", color = Muted, fontSize = 11.sp) }
+        InfoCard("Ограничения", "Сканируются доступные общие файлы. Android закрывает приватные данные приложений и часть Android/data и Android/obb. Фото, видео и аудио не отмечаются автоматически.")
     }
 }
-
 @Composable
 private fun SettingToggle(title: String, description: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
     Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
@@ -323,14 +298,17 @@ private fun SettingToggle(title: String, description: String, checked: Boolean, 
     }
 }
 
-private fun scanAllFiles(): List<ScannedFile> {
+private fun scanAllFiles(onProgress: (Int) -> Unit = {}): List<ScannedFile> {
     val root = Environment.getExternalStorageDirectory()
     val result = mutableListOf<ScannedFile>()
-    val maxFiles = 20000
+    val maxFiles = 100000
+    val visited = HashSet<String>()
     val blocked = setOf("Android/data", "Android/obb")
     fun walk(dir: java.io.File, depth: Int) {
-        if (depth > 20 || result.size >= maxFiles) return
-        val relative = dir.relativeToOrNull(root)?.invariantSeparatorsPath.orEmpty()
+        if (depth > 40 || result.size >= maxFiles) return
+        val canonical = runCatching { dir.canonicalPath }.getOrNull() ?: return
+        if (!visited.add(canonical)) return
+        val relative = runCatching { dir.relativeTo(root).invariantSeparatorsPath }.getOrDefault("")
         if (blocked.any { relative == it || relative.startsWith("$it/") }) return
         val children = runCatching { dir.listFiles() }.getOrNull() ?: return
         children.forEach { file ->
@@ -349,6 +327,7 @@ private fun scanAllFiles(): List<ScannedFile> {
                     else -> FileKind.OTHER
                 }
                 result.add(ScannedFile(Uri.fromFile(file), name, file.length(), file.lastModified() / 1000, kind, file.parent ?: root.absolutePath))
+                if (result.size % 100 == 0) onProgress(result.size)
             }
         }
     }
@@ -358,7 +337,6 @@ private fun scanAllFiles(): List<ScannedFile> {
         else sameSize.map { file -> file.copy(sha256 = hashFileFromFile(file.uri.path)) }
     }
 }
-
 private fun hashFileFromFile(path: String?): String? = runCatching {
     if (path == null) return null
     val digest = java.security.MessageDigest.getInstance("SHA-256")
@@ -425,22 +403,10 @@ private fun InfoCard(title: String, description: String) {
     }
 }
 private fun storageStats(context: Context): Pair<Long, Long> = runCatching {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        val storageManager = context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
-        val statsManager = context.getSystemService(Context.STORAGE_STATS_SERVICE) as StorageStatsManager
-        val uuid = storageManager.getUuidForPath(Environment.getExternalStorageDirectory())
-        statsManager.getTotalBytes(uuid) to statsManager.getFreeBytes(uuid)
-    } else {
-        val stat = StatFs(Environment.getExternalStorageDirectory().path)
-        stat.totalBytes to stat.availableBytes
-    }
-}.getOrElse {
-    runCatching {
-        val stat = StatFs(Environment.getExternalStorageDirectory().path)
-        stat.totalBytes to stat.availableBytes
-    }.getOrDefault(0L to 0L)
-}
-
+    val stat = StatFs(Environment.getExternalStorageDirectory().absolutePath)
+    val total = stat.totalBytes
+    total to stat.availableBytes.coerceIn(0L, total)
+}.getOrElse { 0L to 0L }
 private fun hasStorageAccess(context: Context): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
     Environment.isExternalStorageManager()
 } else {
