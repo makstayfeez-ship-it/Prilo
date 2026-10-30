@@ -201,7 +201,7 @@ private fun Cleaning(context: Context) {
     val protected = setOf(FileKind.PHOTO, FileKind.VIDEO, FileKind.AUDIO)
     val duplicates = remember(files) { files.filter { it.sha256 != null && it.size > 0 }.groupBy { it.sha256 }.values.filter { it.size > 1 }.flatMap { it.drop(1) }.map { it.uri }.toSet() }
     val cutoff = System.currentTimeMillis() / 1000 - oldDays.toLong() * 86400L
-    val eligible = files.filter { file -> file.kind !in protected && file.uri.toString() !in locked && ((allowGif && file.kind == FileKind.GIF) || (allowArchives && file.kind == FileKind.ARCHIVE) || (allowDuplicates && file.uri in duplicates) || (allowOld && file.modified > 0 && file.modified < cutoff)) }
+    val eligible = files.filter { file -> file.kind !in protected && file.uri.toString() !in locked && ((file.kind == FileKind.CACHE) || (allowGif && file.kind == FileKind.GIF) || (allowArchives && file.kind == FileKind.ARCHIVE) || (allowDuplicates && file.uri in duplicates) || (allowOld && file.modified > 0 && file.modified < cutoff)) }
     val selectedFiles = files.filter { it.uri.toString() in selected && it.uri.toString() !in locked && it.kind !in protected }
     val selectedBytes = selectedFiles.sumOf { it.size }
     val visible = if (showLocked) files.filter { it.uri.toString() in locked } else files
