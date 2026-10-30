@@ -18,12 +18,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -55,6 +60,8 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -68,6 +75,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -136,51 +144,104 @@ private fun OptimizerApp(context: Context) {
         TabItem("Настройки", Icons.Default.Settings)
     )
     var selected by remember { mutableIntStateOf(0) }
-    Scaffold(
-        containerColor = Background,
-        bottomBar = {
-            NavigationBar(containerColor = Color(0xFF182226)) {
-                tabs.forEachIndexed { index, tab ->
-                    NavigationBarItem(
-                        selected == index, { selected = index },
-                        icon = { Icon(tab.icon, contentDescription = tab.title) },
-                        label = { Text(tab.title, fontSize = 10.sp) },
-                        colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color(0xFF182226),
-                            selectedTextColor = Accent,
-                            indicatorColor = Accent,
-                            unselectedIconColor = Muted,
-                            unselectedTextColor = Muted
+    MaterialTheme(
+        colorScheme = MaterialTheme.colorScheme,
+        shapes = androidx.compose.material3.Shapes(
+            small = RoundedCornerShape(14.dp),
+            medium = RoundedCornerShape(18.dp),
+            large = RoundedCornerShape(24.dp),
+            extraLarge = RoundedCornerShape(28.dp)
+        )
+    ) {
+        Scaffold(
+            containerColor = Background,
+            bottomBar = {
+                NavigationBar(
+                    containerColor = Color(0xFF182226),
+                    tonalElevation = 0.dp
+                ) {
+                    tabs.forEachIndexed { index, tab ->
+                        NavigationBarItem(
+                            selected = selected == index,
+                            onClick = { selected = index },
+                            icon = { Icon(tab.icon, contentDescription = tab.title) },
+                            label = { Text(tab.title, fontSize = 10.sp) },
+                            colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
+                                selectedIconColor = Color(0xFF182226),
+                                selectedTextColor = Accent,
+                                indicatorColor = Accent,
+                                unselectedIconColor = Muted,
+                                unselectedTextColor = Muted
+                            )
+                        )
+                    }
+                }
+            }
+        ) { padding ->
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0xFF172125), Background, Color(0xFF101517))
                         )
                     )
+                    .padding(padding)
+                    .padding(horizontal = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(15.dp)
+            ) {
+                item {
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("PROJECT", color = Peach, fontSize = 10.sp, letterSpacing = 3.sp)
+                            Text(
+                                "OPTIMIZER",
+                                color = Color(0xFFF4F5F1),
+                                fontSize = 27.sp,
+                                letterSpacing = 1.6.sp
+                            )
+                            Text(
+                                "Умная забота о твоём устройстве",
+                                color = Muted,
+                                fontSize = 12.sp
+                            )
+                        }
+                        Box(
+                            Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(17.dp))
+                                .background(Brush.linearGradient(listOf(Accent, Peach, Coral))),
+                            contentAlignment = androidx.compose.ui.Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.MonitorHeart,
+                                contentDescription = "Optimizer",
+                                tint = Color(0xFF1C292C),
+                                modifier = Modifier.size(25.dp)
+                            )
+                        }
+                    }
                 }
-            }
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF172125), Background, Color(0xFF101517)))).padding(padding).padding(horizontal = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            item {
-                Spacer(Modifier.height(10.dp))
-                Text("PROJECT", color = Peach, fontSize = 11.sp, letterSpacing = 3.sp)
-                Text("OPTIMIZER", color = Color(0xFFF4F5F1), fontSize = 29.sp, letterSpacing = 1.5.sp)
-                Text("Контроль состояния устройства", color = Muted, fontSize = 13.sp)
-            }
-            item {
-                when (selected) {
-                    0 -> Dashboard(context)
-                    1 -> Cleaning(context)
-                    2 -> Games()
-                    3 -> Monitoring(context)
-                    else -> Settings(context)
+                item {
+                    AnimatedContent(targetState = selected, label = "optimizer_screen") { page ->
+                        when (page) {
+                            0 -> Dashboard(context)
+                            1 -> Cleaning(context)
+                            2 -> Games()
+                            3 -> Monitoring(context)
+                            else -> Settings(context)
+                        }
+                    }
                 }
+                item { Spacer(Modifier.height(14.dp)) }
             }
-            item { Spacer(Modifier.height(12.dp)) }
         }
     }
 }
-
 @Composable
 private fun Dashboard(context: Context) {
     val storage = rememberStorageStats(context)
@@ -466,13 +527,32 @@ private fun Cleaning(context: Context) {
 }
 @Composable
 private fun SettingToggle(title: String, description: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(Modifier.weight(1f)) {
-                Text(title, color = Color.White)
-                Text(description, color = Muted, fontSize = 11.sp)
+    Card(
+        Modifier.fillMaxWidth().animateContentSize(),
+        colors = CardDefaults.cardColors(containerColor = Panel),
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, color = Color.White, fontSize = 14.sp)
+                Text(description, color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
             }
-            Checkbox(checked = checked, onCheckedChange = onChecked)
+            Switch(
+                checked = checked,
+                onCheckedChange = onChecked,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color(0xFF182226),
+                    checkedTrackColor = Accent,
+                    uncheckedThumbColor = Muted,
+                    uncheckedTrackColor = Color(0xFF344146),
+                    uncheckedBorderColor = Color(0xFF506066)
+                )
+            )
         }
     }
 }
@@ -577,18 +657,105 @@ private fun hashFile(context: Context, uri: Uri): String? = runCatching {
 
 @Composable
 private fun Games() {
-    InfoCard("Игровой режим", "Здесь будут игровые профили, список игр и быстрые настройки перед запуском.")
-    InfoCard("Без ложных обещаний", "Обычное приложение не может разгонять процессор или видеочип. Доступность системных игровых функций зависит от телефона и версии Android.")
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        ScreenHeading("GAME CENTER", "Игровой центр", "Подготовь телефон к игре и следи за его состоянием.")
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.linearGradient(listOf(Color(0xFF526E68), Color(0xFF354B4D), Color(0xFF26353A))),
+                    RoundedCornerShape(28.dp)
+                )
+                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(28.dp))
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("GAME BOOSTER", color = Peach, fontSize = 10.sp, letterSpacing = 2.sp)
+                Icon(Icons.Default.Gamepad, contentDescription = null, tint = Peach)
+            }
+            Text("Больше контроля.\nМеньше отвлечений.", color = Color.White, fontSize = 25.sp)
+            Text(
+                "Игровые профили и полезные инструменты будут собраны здесь.",
+                color = Color.White.copy(alpha = 0.76f),
+                fontSize = 13.sp,
+                lineHeight = 19.sp
+            )
+            androidx.compose.material3.Surface(
+                color = Accent.copy(alpha = 0.18f),
+                shape = RoundedCornerShape(50)
+            ) {
+                Text(
+                    "РАЗДЕЛ В РАЗРАБОТКЕ",
+                    Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                    color = Accent,
+                    fontSize = 10.sp,
+                    letterSpacing = 1.sp
+                )
+            }
+        }
+        ScreenSectionLabel("ЧТО БУДЕТ В GAME CENTER")
+        FeatureCard("Игровые профили", "Отдельные настройки и быстрые действия для каждой игры.", Peach)
+        FeatureCard("Фокус во время игры", "Быстрый доступ к режиму «Не беспокоить» и другим доступным настройкам Android.", Coral)
+        FeatureCard("Контроль нагрузки", "Температурное состояние, свободная память и предупреждения о перегреве.", Accent)
+        InfoCard(
+            "Без фальшивого ускорения",
+            "Обычное приложение не может безопасно разгонять процессор или видеочип. Мы будем использовать реальные возможности Android и не обещать несуществующий прирост FPS."
+        )
+    }
 }
 @Composable
 private fun Monitoring(context: Context) {
-    MetricCard("Свободная оперативная память", memoryInfo(context), Modifier.fillMaxWidth())
     val stats = rememberStorageStats(context)
-    MetricCard("Свободное хранилище", stats?.let { formatStorageBytes(context, it.freeBytes) } ?: "Проверка…", Modifier.fillMaxWidth())
-    if (stats != null) {
-        InfoCard("Сведения о накопителе", "Всего: ${formatStorageBytes(context, stats.totalBytes)}\nЗанято: ${formatStorageBytes(context, stats.usedBytes)}\nИсточник: ${stats.source}")
+    val memory = runCatching {
+        val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val info = ActivityManager.MemoryInfo()
+        manager.getMemoryInfo(info)
+        val total = info.totalMem.coerceAtLeast(1L)
+        val free = info.availMem.coerceIn(0L, total)
+        Triple(free, total, 1f - free.toFloat() / total.toFloat())
+    }.getOrNull()
+    val storageFraction = stats?.let {
+        (it.usedBytes.toFloat() / it.totalBytes.coerceAtLeast(1L)).coerceIn(0f, 1f)
+    } ?: 0f
+    val memoryFraction = memory?.third ?: 0f
+    val animatedStorage by animateFloatAsState(storageFraction, tween(850), label = "monitor_storage")
+    val animatedMemory by animateFloatAsState(memoryFraction, tween(850), label = "monitor_memory")
+
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        ScreenHeading("DEVICE HEALTH", "Мониторинг", "Основные показатели телефона в одном месте.")
+        MonitorMetricCard(
+            title = "Хранилище",
+            value = stats?.let { formatStorageBytes(context, it.freeBytes) } ?: "Проверка…",
+            subtitle = stats?.let { "Свободно из " + formatStorageBytes(context, it.totalBytes) } ?: "Ожидаем данные Android",
+            fraction = animatedStorage,
+            tint = Accent,
+            inverse = true
+        )
+        MonitorMetricCard(
+            title = "Оперативная память",
+            value = memory?.let { formatStorageBytes(context, it.first) } ?: memoryInfo(context),
+            subtitle = memory?.let { "Свободно из " + formatStorageBytes(context, it.second) } ?: "Показатель доступной RAM",
+            fraction = animatedMemory,
+            tint = Peach
+        )
+        val thermal = thermalInfo(context)
+        FeatureCard(
+            "Тепловое состояние",
+            thermal,
+            when {
+                thermal.contains("Критическое") || thermal.contains("Аварийное") -> Rose
+                thermal.contains("Высокое") || thermal.contains("Умеренное") -> Coral
+                else -> Accent
+            }
+        )
+        InfoCard(
+            "Как читать показатели",
+            "Свободная RAM — память, доступная Android прямо сейчас. Система сама перераспределяет её между приложениями. Свободное место показывает запас накопителя, а тепловой статус помогает заметить нагрев."
+        )
+        ScreenSectionLabel("ИСТОЧНИК ДАННЫХ")
+        InfoCard("Хранилище", stats?.source ?: "Данные хранилища пока недоступны.")
     }
-    MetricCard("Тепловое состояние", thermalInfo(context), Modifier.fillMaxWidth())
 }
 @Composable
 private fun Settings(context: Context) {
@@ -622,23 +789,25 @@ private fun Settings(context: Context) {
 
     val lastRun = remember(refreshToken) { prefs.getLong("auto_clean_last_run", 0L) }
     val lastFreed = remember(refreshToken) { prefs.getLong("auto_clean_last_freed_estimate", 0L) }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        InfoCard("Автоматическая очистка", "Выдай разрешение Android один раз — и оптимизатор сможет по расписанию удалять доступные временные файлы общего хранилища и свой кэш.")
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        ScreenHeading("PERSONAL CONTROL", "Настройки", "Подстрой приложение под свой телефон — остальное оно сделает само.")
+        InfoCard(
+            "Автопилот устройства",
+            "Включи расписание, чтобы ProjectOptimizer сам запускал безопасную очистку доступных временных файлов."
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !hasAccess) {
-            Button(onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth()) {
-                Text("Выдать разрешение Android · все файлы")
-            }
+            PrimaryActionButton("Выдать разрешение Android", onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth())
             InfoCard(
                 "Нужно системное разрешение",
-                "Android откроет собственный экран специального доступа. Включи «Разрешить доступ к управлению всеми файлами» для Project Optimizer и вернись сюда — статус обновится автоматически."
+                "Android откроет собственный экран специального доступа. Включи «Разрешить доступ к управлению всеми файлами» и вернись сюда."
             )
         } else {
-            InfoCard("Доступ к файлам", "Разрешение предоставлено. Оптимизатор может очищать доступные временные файлы общего хранилища.")
+            FeatureCard("Доступ к файлам", "Разрешение предоставлено. Доступны только те файлы и каталоги, которые разрешает Android.", Accent)
         }
 
         SettingToggle(
             "Включить автоочистку",
-            "Очистка запускается в фоне, когда Android разрешит фоновую работу.",
+            "Запуск в фоне по выбранному расписанию. Android может немного сдвигать время.",
             enabled
         ) { checked ->
             enabled = checked
@@ -648,66 +817,165 @@ private fun Settings(context: Context) {
         }
 
         if (enabled) {
-            Text("Время автоочистки", color = Color.White, fontSize = 14.sp)
-            Button(onClick = {
+            ScreenSectionLabel("РАСПИСАНИЕ")
+            FeatureCard("Время запуска", "%02d:%02d".format(cleanHour, cleanMinute) + " · выбранное время очистки", Peach)
+            PrimaryActionButton("Изменить время", onClick = {
                 TimePickerDialog(context, { _, hour, minute ->
                     cleanHour = hour
                     cleanMinute = minute
                     prefs.edit().putInt("auto_clean_hour", hour).putInt("auto_clean_minute", minute).apply()
                     if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
                 }, cleanHour, cleanMinute, true).show()
-            }, modifier = Modifier.fillMaxWidth()) {
-                Text("Выбрать время · %02d:%02d".format(cleanHour, cleanMinute))
-            }
-        }
-        Text("Как часто запускать", color = Color.White, fontSize = 14.sp)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(1, 3, 7).forEach { days ->
-                Button(
-                    onClick = {
-                        intervalDays = days
-                        prefs.edit().putInt("auto_clean_interval_days", days).apply()
-                        if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(when (days) { 1 -> "Каждый день"; 3 -> "3 дня"; else -> "7 дней" }, fontSize = 11.sp)
+            }, modifier = Modifier.fillMaxWidth())
+
+            ScreenSectionLabel("ЧАСТОТА")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(1, 3, 7).forEach { days ->
+                    val selected = intervalDays == days
+                    androidx.compose.material3.Surface(
+                        onClick = {
+                            intervalDays = days
+                            prefs.edit().putInt("auto_clean_interval_days", days).apply()
+                            if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
+                        },
+                        modifier = Modifier.weight(1f),
+                        color = if (selected) Accent.copy(alpha = 0.18f) else Panel,
+                        shape = RoundedCornerShape(16.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) Accent else Color.White.copy(alpha = 0.07f))
+                    ) {
+                        Column(
+                            Modifier.padding(vertical = 13.dp, horizontal = 5.dp),
+                            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+                        ) {
+                            Text(when (days) { 1 -> "1"; 3 -> "3"; else -> "7" }, color = if (selected) Accent else Color.White, fontSize = 19.sp)
+                            Text(when (days) { 1 -> "день"; 3 -> "дня"; else -> "дней" }, color = Muted, fontSize = 11.sp)
+                        }
+                    }
                 }
             }
+
+            ScreenSectionLabel("ЧТО ОЧИЩАТЬ")
+            SettingToggle("Кэш Project Optimizer", "Временные файлы самого оптимизатора.", cleanAppCache) { checked ->
+                cleanAppCache = checked
+                prefs.edit().putBoolean("auto_clean_app_cache", checked).apply()
+                if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
+                else if (enabled) cancelAutoClean(context)
+            }
+            SettingToggle(
+                "Временные и мусорные файлы",
+                "Старые .tmp, .temp, .part и файлы из папок temp/tmp/cache старше 14 дней.",
+                cleanTempFiles
+            ) { checked ->
+                cleanTempFiles = checked
+                prefs.edit().putBoolean("auto_clean_temp_files", checked).apply()
+                if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
+                else if (enabled) cancelAutoClean(context)
+            }
+            if (!cleanAppCache && !cleanTempFiles) {
+                InfoCard("Нечего очищать", "Включи хотя бы один тип очистки, чтобы расписание могло работать.")
+            }
         }
 
-        Text("Что очищать", color = Color.White, fontSize = 14.sp)
-        SettingToggle("Кэш Project Optimizer", "Удаляет временные файлы самого оптимизатора.", cleanAppCache) { checked ->
-            cleanAppCache = checked
-            prefs.edit().putBoolean("auto_clean_app_cache", checked).apply()
-            if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
-            else if (enabled) cancelAutoClean(context)
-        }
-        SettingToggle(
-            "Временные и мусорные файлы",
-            "Удаляет старые .tmp, .temp, .part и файлы из папок temp/tmp/cache старше 14 дней.",
-            cleanTempFiles
-        ) { checked ->
-            cleanTempFiles = checked
-            prefs.edit().putBoolean("auto_clean_temp_files", checked).apply()
-            if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
-            else if (enabled) cancelAutoClean(context)
-        }
-
+        ScreenSectionLabel("ИСТОРИЯ И БЕЗОПАСНОСТЬ")
         InfoCard(
             "Последняя очистка",
             if (lastRun > 0L) {
-                "Выполнена: ${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(lastRun))}\n" +
-                    "Оценочно удалено: ${formatStorageBytes(context, lastFreed)}"
+                "Выполнена: " + java.text.DateFormat.getDateTimeInstance().format(java.util.Date(lastRun)) + "\n" +
+                    "Оценочно удалено: " + formatStorageBytes(context, lastFreed)
             } else "Автоматическая очистка ещё не запускалась."
         )
         InfoCard(
-            "Что Android всё равно закрывает",
-            "Даже с этим разрешением Android 11+ не открывает сторонним приложениям приватные каталоги других приложений и часть Android/data и Android/obb. Их закрытый кэш нельзя безопасно обойти обычным приложением без root или системных привилегий. Фото, видео, музыка, документы, мессенджеры и резервные копии защищены от автоудаления."
+            "Ограничения Android",
+            "Android 11+ закрывает приватные каталоги других приложений и часть Android/data и Android/obb. Обычное приложение не может безопасно обойти эти ограничения. Фото, видео, музыка, документы, данные мессенджеров и резервные копии защищены от автоудаления."
         )
         InfoCard("Конфиденциальность", "Настройки и расписание хранятся на телефоне. Список личных файлов никуда не отправляется.")
     }
 }
+@Composable
+private fun ScreenHeading(eyebrow: String, title: String, subtitle: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(eyebrow, color = Peach, fontSize = 10.sp, letterSpacing = 2.sp)
+        Text(title, color = Color(0xFFF4F5F1), fontSize = 24.sp)
+        Text(subtitle, color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+    }
+}
+
+@Composable
+private fun ScreenSectionLabel(label: String) {
+    Text(label, color = Peach, fontSize = 10.sp, letterSpacing = 1.8.sp)
+}
+
+@Composable
+private fun PrimaryActionButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.height(52.dp),
+        shape = RoundedCornerShape(17.dp)
+    ) {
+        Text(label, fontSize = 14.sp)
+    }
+}
+
+@Composable
+private fun FeatureCard(title: String, description: String, accent: Color) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(CardGradient, RoundedCornerShape(20.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(20.dp))
+            .padding(16.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(13.dp)
+    ) {
+        Box(
+            Modifier
+                .size(9.dp)
+                .clip(RoundedCornerShape(50))
+                .background(accent)
+        )
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, color = Color.White, fontSize = 14.sp)
+            Text(description, color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
+        }
+    }
+}
+
+@Composable
+private fun MonitorMetricCard(
+    title: String,
+    value: String,
+    subtitle: String,
+    fraction: Float,
+    tint: Color,
+    inverse: Boolean = false
+) {
+    val animated by animateFloatAsState(fraction.coerceIn(0f, 1f), tween(900), label = title)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(if (inverse) CardGradient else Panel, RoundedCornerShape(22.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(22.dp))
+            .padding(17.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp)
+    ) {
+        Text(title, color = tint, fontSize = 12.sp)
+        Text(value, color = Color.White, fontSize = 25.sp)
+        Text(subtitle, color = Muted, fontSize = 11.sp)
+        Box(
+            Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.22f))
+        ) {
+            Box(
+                Modifier.fillMaxWidth(animated.coerceAtLeast(0.015f)).height(8.dp)
+                    .clip(RoundedCornerShape(50)).background(Brush.horizontalGradient(listOf(tint, Coral)))
+            )
+        }
+    }
+}
+
 @Composable
 private fun MetricCard(title: String, value: String, modifier: Modifier = Modifier) {
     Card(
