@@ -590,8 +590,19 @@ private fun readStorageStats(context: Context): StorageSnapshot? {
             } else null
         }.getOrNull()
 
+    fun fileSnapshot(path: java.io.File, source: String): StorageSnapshot? =
+        runCatching {
+            val total = path.totalSpace
+            val free = path.usableSpace
+            if (total > 0L && free >= 0L && free <= total) {
+                StorageSnapshot(total, free, source)
+            } else null
+        }.getOrNull()
+
     return statFsSnapshot(primaryPath, "StatFs · общее хранилище")
+        ?: fileSnapshot(primaryPath, "File API · общее хранилище")
         ?: statFsSnapshot(dataPath, "StatFs · резервный раздел")
+        ?: fileSnapshot(dataPath, "File API · резервный раздел")
 }
 
 /**
