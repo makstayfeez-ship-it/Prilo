@@ -434,14 +434,17 @@ private fun Cleaning(context: Context) {
         }) { Text("Удалить выбранное") } },
         dismissButton = { TextButton(onClick = { showDialog = false }) { Text("Отмена") } }
     )
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         val stats = rememberStorageStats(context)
-        InfoCard(
-            "Память телефона",
-            stats?.let {
-                "Всего: ${formatStorageBytes(context, it.totalBytes)}\nЗанято: ${formatStorageBytes(context, it.usedBytes)}\nСвободно: ${formatStorageBytes(context, it.freeBytes)}\nИсточник: ${it.source}"
-            } ?: "Получаю системные данные хранилища…"
+        ScreenHeading("SMART CLEANUP", "Очистка", "Найди лишнее, проверь список и освободи место безопасно.")
+        StorageHeroCard(
+            free = stats?.let { formatStorageBytes(context, it.freeBytes) } ?: "Проверка…",
+            total = stats?.let { formatStorageBytes(context, it.totalBytes) } ?: "Получаю данные…",
+            used = stats?.let { formatStorageBytes(context, it.usedBytes) } ?: "—",
+            progress = stats?.let { it.usedBytes.toFloat() / it.totalBytes.coerceAtLeast(1L).toFloat() } ?: 0f,
+            source = stats?.source ?: "Android"
         )
+        ScreenSectionLabel("ДОСТУП И СКАНИРОВАНИЕ")
         if (!hasAccess) {
             Button(onClick = { requestAllFilesAccess(context) }, modifier = Modifier.fillMaxWidth()) { Text("Разрешить доступ ко всем файлам") }
             InfoCard("Доступ Android", "Включи специальное разрешение в системных настройках и вернись в приложение.")
@@ -483,6 +486,7 @@ private fun Cleaning(context: Context) {
         InfoCard("Состояние", status)
         Text(lastDeleted, color = Accent, fontSize = 13.sp)
         if (scanned) {
+            ScreenSectionLabel("РЕЗУЛЬТАТЫ ПОИСКА")
             Button(enabled = eligible.isNotEmpty() && !deleting, onClick = {
                 selected = eligible.map { it.uri.toString() }.toSet()
                 showDialog = true
@@ -497,8 +501,17 @@ private fun Cleaning(context: Context) {
             } else Text("Эти файлы исключены из очистки. Сними замок, чтобы вернуть их в общий список.", color = Muted, fontSize = 12.sp)
             visible.take(limit).forEach { file ->
                 val key = file.uri.toString(); val isLocked = key in locked; val isProtected = file.kind in protected
-                Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(14.dp)) {
-                    Column(Modifier.fillMaxWidth().padding(10.dp)) {
+                Card(
+                    Modifier.fillMaxWidth().animateContentSize(),
+                    colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+                    shape = RoundedCornerShape(18.dp)
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .background(CardGradient, RoundedCornerShape(18.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(18.dp))
+                            .padding(13.dp)
+                    ) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column(Modifier.weight(1f)) {
                                 Text(file.name, color = Color.White, fontSize = 13.sp)
@@ -514,7 +527,7 @@ private fun Cleaning(context: Context) {
             if (visible.size > limit) Button(onClick = { limit += 100 }, modifier = Modifier.fillMaxWidth()) { Text("Показать ещё (${visible.size - limit})") }
             if (visible.isEmpty()) InfoCard("Пусто", if (showLocked) "Нет файлов под замком." else "Файлы не найдены.")
         }
-        Text("Правила поиска", color = Color.White, fontSize = 16.sp)
+        ScreenSectionLabel("ПРАВИЛА ПОИСКА")
         SettingToggle("GIF-файлы", "Автоматически отмечать GIF", allowGif) { allowGif = it; prefs.edit().putBoolean("allow_gif", it).apply() }
         SettingToggle("Архивы и установочные файлы", "ZIP, RAR, 7Z, TAR, GZ, APK и другие", allowArchives) { allowArchives = it; prefs.edit().putBoolean("allow_archives", it).apply() }
         SettingToggle("Повторяющиеся файлы", "Точные копии по SHA-256", allowDuplicates) { allowDuplicates = it; prefs.edit().putBoolean("allow_duplicates", it).apply() }
