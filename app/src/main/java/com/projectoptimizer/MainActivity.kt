@@ -201,24 +201,17 @@ private fun OptimizerApp(context: Context) {
         Scaffold(
             containerColor = Background,
             bottomBar = {
-                NavigationBar(
-                    containerColor = Color(0xFF101A1E),
-                    tonalElevation = 0.dp
-                ) {
-                    tabs.forEachIndexed { index, tab ->
-                        NavigationBarItem(
-                            selected = selected == index,
-                            onClick = { selected = index; assistantOpen = false },
-                            icon = { Icon(tab.icon, contentDescription = tab.title) },
-                            label = { Text(tab.title, fontSize = 10.sp, maxLines = 1) },
-                            colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
-                                selectedIconColor = Color(0xFF14221D),
-                                selectedTextColor = Accent,
-                                indicatorColor = Accent,
-                                unselectedIconColor = Muted.copy(alpha = 0.72f),
-                                unselectedTextColor = Muted.copy(alpha = 0.72f)
-                            )
-                        )
+                androidx.compose.material3.Surface(color = Color(0xFF101A1E), tonalElevation = 0.dp, shadowElevation = 18.dp) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 9.dp), horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        tabs.forEachIndexed { index, tab ->
+                            val active = selected == index
+                            Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).clickable { selected = index; assistantOpen = false }.padding(vertical = 5.dp), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Box(Modifier.clip(RoundedCornerShape(16.dp)).background(if (active) Accent else Color.Transparent).padding(horizontal = 18.dp, vertical = 6.dp)) {
+                                    Icon(tab.icon, contentDescription = tab.title, tint = if (active) Color(0xFF14221D) else Muted.copy(alpha = .75f), modifier = Modifier.size(22.dp))
+                                }
+                                Text(tab.title, color = if (active) Accent else Muted.copy(alpha = .72f), fontSize = 9.sp, maxLines = 1)
+                            }
+                        }
                     }
                 }
             }
@@ -296,126 +289,99 @@ private fun OptimizerApp(context: Context) {
 private fun Dashboard(context: Context) {
     val storage = rememberStorageStats(context)
     val usedFraction = (storage?.let { it.usedBytes.toFloat() / it.totalBytes.coerceAtLeast(1L).toFloat() } ?: 0f).coerceIn(0f, 1f)
-    val animatedUsage by animateFloatAsState(
-        targetValue = usedFraction,
-        animationSpec = tween(durationMillis = 950),
-        label = "storage_usage"
-    )
-    val freeLabel = storage?.let { formatStorageBytes(context, it.freeBytes) } ?: "Проверка…"
-    val totalLabel = storage?.let { formatStorageBytes(context, it.totalBytes) } ?: "Получаю данные…"
-    val usedLabel = storage?.let { formatStorageBytes(context, it.usedBytes) } ?: "—"
-
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        ScreenHeading("DEVICE OVERVIEW", "Состояние телефона", "Главные показатели устройства в одном месте.")
-        StorageHeroCard(
-            free = freeLabel,
-            total = totalLabel,
-            used = usedLabel,
-            progress = animatedUsage,
-            source = storage?.source ?: "Считываем хранилище Android"
-        )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MetricCard("Свободная RAM", availableMemoryLabel(context), Modifier.weight(1f))
-            MetricCard("Нагрев", thermalInfo(context), Modifier.weight(1f))
-        }
-        val prefs = remember { context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE) }
+    val animatedUsage by animateFloatAsState(usedFraction, tween(1000), label = "dashboard_storage_ring")
+    val battery = readBatterySnapshot(context)
+    val prefs = remember { context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE) }
     var showTips by remember { mutableStateOf(prefs.getBoolean("show_optimizer_tips", true)) }
     val tips = listOf(
-        "Проверяй хранилище регулярно" to "Если свободного места становится мало, открой «Очистка» и сначала просмотри найденные файлы. Удаляй только то, что точно не нужно.",
-        "Следи за нагревом" to "Во время тяжёлых игр телефон может нагреваться. Делай перерывы, не оставляй устройство под прямым солнцем и не играй во время зарядки, если оно сильно греется.",
-        "Не закрывай все приложения подряд" to "Android сам управляет оперативной памятью. Постоянное принудительное закрытие приложений обычно не делает телефон быстрее.",
-        "Автоочистка без риска" to "Настрой интервал и выбери только временные файлы. Личные фото, видео и документы не должны удаляться автоматически.",
-        "Оставляй запас места" to "Когда накопитель почти заполнен, телефону сложнее обновлять приложения и сохранять данные. Старайся периодически проверять свободное место.",
-        "Дай телефону остыть" to "Если корпус стал горячим, приостанови тяжёлые задачи и дай устройству остыть. Не используй сомнительные приложения для принудительного охлаждения."
+        "Не закрывай всё подряд" to "Android сам распределяет оперативную память. Постоянное закрытие всех приложений часто только заставляет их запускаться заново.",
+        "Следи за температурой" to "Если телефон сильно нагрелся, сделай паузу и дай ему остыть. Не используй сомнительные приложения для принудительного охлаждения.",
+        "Оставляй запас накопителя" to "Когда свободного места мало, обновлениям и приложениям сложнее работать. Проверяй большие файлы перед удалением.",
+        "Играй с умом" to "Перед долгой игровой сессией проверь нагрев и заряд. Игровой фокус поможет убрать отвлекающие уведомления."
     )
-    val storageAdvice = when {
-            storage == null -> "Пока не удалось получить данные хранилища. Попробуй обновить экран позже."
-            usedFraction >= 0.9f -> "Свободного места мало. Рекомендуем проверить крупные и временные файлы."
-            usedFraction >= 0.75f -> "Хранилище постепенно заполняется. Можно проверить, что занимает больше всего места."
-            else -> "С хранилищем всё в порядке. Продолжай пользоваться телефоном — мы поможем следить за состоянием."
+    Column(verticalArrangement = Arrangement.spacedBy(17.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("PROJECT OPTIMIZER", color = Accent, fontSize = 10.sp, letterSpacing = 2.2.sp)
+                Text("Твой телефон.\nПод контролем.", color = Color.White, fontSize = 27.sp, lineHeight = 31.sp)
+            }
+            Box(Modifier.size(44.dp).clip(RoundedCornerShape(16.dp)).background(Brush.linearGradient(listOf(Accent, Peach, Coral))), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                Text("✦", color = Background, fontSize = 24.sp)
+            }
         }
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(30.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF496B61), Color(0xFF2D4848), Color(0xFF202F35))))
+                .border(1.dp, Color.White.copy(alpha = 0.13f), RoundedCornerShape(30.dp))
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("СОСТОЯНИЕ УСТРОЙСТВА", color = Peach, fontSize = 10.sp, letterSpacing = 1.8.sp)
+                Text("● LIVE", color = Accent, fontSize = 10.sp, letterSpacing = 1.sp)
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                Box(Modifier.size(126.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        drawArc(Color.White.copy(alpha = 0.12f), -90f, 360f, false, style = Stroke(width = 12.dp.toPx()))
+                        drawArc(Brush.sweepGradient(listOf(Accent, Peach, Coral, Accent)), -90f, animatedUsage * 360f, false, style = Stroke(width = 12.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                    }
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                        Text((animatedUsage * 100).toInt().toString() + "%", color = Color.White, fontSize = 27.sp)
+                        Text("ЗАНЯТО", color = Muted, fontSize = 9.sp, letterSpacing = 1.2.sp)
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text(storage?.let { formatStorageBytes(context, it.freeBytes) } ?: "—", color = Color.White, fontSize = 30.sp)
+                    Text("свободно на накопителе", color = Muted, fontSize = 12.sp)
+                    Text("из " + (storage?.let { formatStorageBytes(context, it.totalBytes) } ?: "—"), color = Color.White.copy(alpha = 0.72f), fontSize = 12.sp)
+                    Text(if (usedFraction >= .9f) "Мало свободного места" else if (usedFraction >= .75f) "Накопитель заполнен" else "Хранилище в порядке", color = if (usedFraction >= .9f) Coral else Accent, fontSize = 11.sp)
+                }
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = .12f)))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column { Text("ЗАНЯТО", color = Muted, fontSize = 9.sp, letterSpacing = 1.sp); Text(storage?.let { formatStorageBytes(context, it.usedBytes) } ?: "—", color = Color.White, fontSize = 14.sp) }
+                Column(horizontalAlignment = androidx.compose.ui.Alignment.End) { Text("ИСТОЧНИК", color = Muted, fontSize = 9.sp, letterSpacing = 1.sp); Text("Android", color = Color.White, fontSize = 14.sp) }
+            }
+        }
+        Text("БЫСТРЫЙ ОБЗОР", color = Peach, fontSize = 10.sp, letterSpacing = 2.sp)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            DashboardMetric("Оперативная память", availableMemoryLabel(context), "ДОСТУПНО", Accent, Modifier.weight(1f))
+            DashboardMetric("Температура", thermalInfo(context), "ТЕПЛОВОЙ СТАТУС", Peach, Modifier.weight(1f))
+        }
+        DashboardMetric("Аккумулятор", battery?.let { it.percent.toString() + "% · " + if (it.charging) "заряжается" else "не заряжается" } ?: "Нет данных", "СОСТОЯНИЕ БАТАРЕИ", Coral, Modifier.fillMaxWidth())
         if (showTips) {
-            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("OPTIMIZER СОВЕТУЕТ", color = Peach, fontSize = 10.sp, letterSpacing = 1.8.sp)
-                    Text("Листай →", color = Muted, fontSize = 10.sp)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("OPTIMIZER ПОДСКАЗЫВАЕТ", color = Peach, fontSize = 10.sp, letterSpacing = 1.6.sp)
+                    Text("Листай карточки →", color = Muted, fontSize = 10.sp)
                 }
                 val pagerState = rememberPagerState(pageCount = { tips.size })
                 HorizontalPager(state = pagerState, modifier = Modifier.fillMaxWidth()) { page ->
-                    InfoCard(
-                        if (page == 0) "Подсказка Optimizer · Состояние" else "Подсказка Optimizer · ${page + 1}/${tips.size}",
-                        if (page == 0) storageAdvice + "\n\n" + tips[page].second else tips[page].second
-                    )
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Brush.linearGradient(listOf(Color(0xFF354A48), Color(0xFF202D32)))).border(1.dp, Color.White.copy(alpha = .07f), RoundedCornerShape(24.dp)).padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("0" + (page + 1) + " / 0" + tips.size, color = Accent, fontSize = 10.sp, letterSpacing = 1.4.sp)
+                        Text(tips[page].first, color = Color.White, fontSize = 18.sp)
+                        Text(tips[page].second, color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
+                    }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                    repeat(tips.size) { index ->
-                        Box(
-                            Modifier.padding(horizontal = 3.dp)
-                                .size(if (pagerState.currentPage == index) 8.dp else 6.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(if (pagerState.currentPage == index) Accent else Muted.copy(alpha = 0.5f))
-                        )
-                    }
+                    repeat(tips.size) { i -> Box(Modifier.padding(horizontal = 3.dp).size(if (pagerState.currentPage == i) 18.dp else 6.dp, 6.dp).clip(RoundedCornerShape(20.dp)).background(if (pagerState.currentPage == i) Accent else Muted.copy(alpha = .35f))) }
                 }
             }
         }
+        InfoCard("Умная забота о телефоне", "Project Optimizer показывает реальные системные показатели, помогает находить безопасные для удаления файлы и подготавливает удобные инструменты для игр. Он не обещает невозможного разгона процессора.")
     }
 }
 
 @Composable
-private fun StorageHeroCard(
-    free: String,
-    total: String,
-    used: String,
-    progress: Float,
-    source: String
-) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .background(
-                Brush.linearGradient(
-                    listOf(Color(0xFF526E68), Color(0xFF354B4D), Color(0xFF26353A))
-                ),
-                RoundedCornerShape(28.dp)
-            )
-            .border(1.dp, Color.White.copy(alpha = 0.13f), RoundedCornerShape(28.dp))
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(13.dp)
-    ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("ХРАНИЛИЩЕ", color = Peach, fontSize = 11.sp, letterSpacing = 2.sp)
-            Text("●", color = Accent, fontSize = 15.sp)
-        }
-        Text(free, color = Color(0xFFF8F5EF), fontSize = 35.sp)
-        Text("свободно из $total", color = Color.White.copy(alpha = 0.78f), fontSize = 13.sp)
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(11.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(Color.Black.copy(alpha = 0.22f))
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth(progress.coerceIn(0.015f, 1f))
-                    .height(11.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(AccentGradient)
-            )
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text("ЗАНЯТО", color = Color.White.copy(alpha = 0.65f), fontSize = 9.sp, letterSpacing = 1.sp)
-                Text(used, color = Color.White, fontSize = 14.sp)
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text("ИСТОЧНИК", color = Color.White.copy(alpha = 0.65f), fontSize = 9.sp, letterSpacing = 1.sp)
-                Text(source, color = Color.White, fontSize = 10.sp)
-            }
-        }
+private fun DashboardMetric(title: String, value: String, caption: String, tint: Color, modifier: Modifier = Modifier) {
+    Column(modifier.clip(RoundedCornerShape(23.dp)).background(Brush.linearGradient(listOf(Color(0xFF2C3C40), Color(0xFF1D292D)))).border(1.dp, Color.White.copy(alpha = .07f), RoundedCornerShape(23.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(caption, color = tint, fontSize = 9.sp, letterSpacing = 1.2.sp)
+        Text(title, color = Muted, fontSize = 12.sp)
+        Text(value, color = Color.White, fontSize = 19.sp, lineHeight = 23.sp)
     }
 }
+
 @Composable
 private fun Cleaning(context: Context) {
     val prefs = remember { context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE) }
@@ -917,30 +883,55 @@ private fun Games(context: Context) {
     Column(verticalArrangement = Arrangement.spacedBy(15.dp)) {
         ScreenHeading("GAME CENTER", "Игровой центр", "Твоя игровая зона: запускай игры и включай фокус перед матчем.")
         Column(
-            Modifier.fillMaxWidth()
-                .background(
-                    Brush.linearGradient(listOf(Color(0xFF5B547D), Color(0xFF35434B), Color(0xFF202E34))),
-                    RoundedCornerShape(28.dp)
-                )
-                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(28.dp))
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(30.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF51447A), Color(0xFF302F4C), Color(0xFF1D292F))))
+                .border(1.dp, Color(0xFFB69AFF).copy(alpha = .22f), RoundedCornerShape(30.dp))
                 .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(15.dp)
         ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("OPTIMIZER / GAME", color = Peach, fontSize = 10.sp, letterSpacing = 2.sp)
-                Icon(Icons.Default.Gamepad, contentDescription = null, tint = Peach)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("OPTIMIZER / GAME", color = Color(0xFFC7B5FF), fontSize = 10.sp, letterSpacing = 2.sp)
+                    Text("Игровой режим", color = Color.White, fontSize = 25.sp)
+                }
+                Box(Modifier.size(44.dp).clip(RoundedCornerShape(15.dp)).background(Color.White.copy(alpha = .10f)), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    Icon(Icons.Default.Gamepad, contentDescription = null, tint = Color(0xFFC7B5FF), modifier = Modifier.size(25.dp))
+                }
             }
-            Text("Время играть.", color = Color.White, fontSize = 29.sp)
-            Text(
-                "Избранные игры, быстрый запуск и меньше отвлекающих уведомлений.",
-                color = Color.White.copy(alpha = 0.76f),
-                fontSize = 13.sp,
-                lineHeight = 19.sp
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                GameStatPill("${chosenGames.size} ИГР")
-                GameStatPill(if (hasDndAccess) "ФОКУС ДОСТУПЕН" else "ФОКУС НЕ НАСТРОЕН")
+            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Box(Modifier.size(100.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        drawArc(Color.White.copy(alpha = .12f), -90f, 360f, false, style = Stroke(width = 9.dp.toPx()))
+                        drawArc(Brush.sweepGradient(listOf(Color(0xFF9C76FF), Color(0xFF62D9BD), Color(0xFF9C76FF))), -90f, if (focusActive) 300f else 220f, false, style = Stroke(width = 9.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                    }
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                        Text(if (focusActive) "ON" else "READY", color = Color.White, fontSize = 17.sp)
+                        Text("FOCUS", color = Color(0xFFC7B5FF), fontSize = 8.sp, letterSpacing = 1.sp)
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("Твоя игровая зона", color = Color.White, fontSize = 18.sp)
+                    Text("Быстрый запуск игр и меньше отвлекающих уведомлений во время матча.", color = Color.White.copy(alpha = .68f), fontSize = 12.sp, lineHeight = 18.sp)
+                    Text(chosenGames.size.toString() + " ИГР В БИБЛИОТЕКЕ", color = Color(0xFFB6F0D8), fontSize = 10.sp, letterSpacing = 1.sp)
+                }
             }
+            androidx.compose.material3.Surface(
+                onClick = {
+                    val first = chosenGames.firstOrNull()
+                    if (first != null) launchGame(context, first.packageName, focusBeforeLaunch)
+                    else showPicker = true
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(17.dp),
+                color = Color(0xFFB69AFF)
+            ) {
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Icon(Icons.Default.Gamepad, contentDescription = null, tint = Color(0xFF211A36))
+                    Spacer(Modifier.width(9.dp))
+                    Text(if (chosenGames.isEmpty()) "ДОБАВИТЬ ПЕРВУЮ ИГРУ" else "ЗАПУСТИТЬ ИГРУ", color = Color(0xFF211A36), fontSize = 12.sp, letterSpacing = 1.sp)
+                }
+            }
+            Text("Инструменты используют возможности Android и не обещают искусственного прироста FPS.", color = Color.White.copy(alpha = .55f), fontSize = 10.sp, lineHeight = 15.sp)
         }
 
         ScreenSectionLabel("ИГРОВОЙ ФОКУС")
