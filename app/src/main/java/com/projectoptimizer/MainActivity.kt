@@ -1,7 +1,6 @@
 package com.projectoptimizer
 
 import android.app.ActivityManager
-import android.app.TimePickerDialog
 import android.app.usage.StorageStatsManager
 import android.content.Intent
 import android.provider.Settings
@@ -36,6 +35,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
@@ -270,18 +271,47 @@ private fun Dashboard(context: Context) {
             MetricCard("Оперативная память", memoryInfo(context), Modifier.weight(1f))
             MetricCard("Нагрев устройства", thermalInfo(context), Modifier.weight(1f))
         }
-        val storageAdvice = when {
+        val prefs = remember { context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE) }
+    var showTips by remember { mutableStateOf(prefs.getBoolean("show_optimizer_tips", true)) }
+    val tips = listOf(
+        "Проверяй хранилище регулярно" to "Если свободного места становится мало, открой «Очистка» и сначала просмотри найденные файлы. Удаляй только то, что точно не нужно.",
+        "Следи за нагревом" to "Во время тяжёлых игр телефон может нагреваться. Делай перерывы, не оставляй устройство под прямым солнцем и не играй во время зарядки, если оно сильно греется.",
+        "Не закрывай все приложения подряд" to "Android сам управляет оперативной памятью. Постоянное принудительное закрытие приложений обычно не делает телефон быстрее.",
+        "Автоочистка без риска" to "Настрой интервал и выбери только временные файлы. Личные фото, видео и документы не должны удаляться автоматически.",
+        "Оставляй запас места" to "Когда накопитель почти заполнен, телефону сложнее обновлять приложения и сохранять данные. Старайся периодически проверять свободное место.",
+        "Дай телефону остыть" to "Если корпус стал горячим, приостанови тяжёлые задачи и дай устройству остыть. Не используй сомнительные приложения для принудительного охлаждения."
+    )
+    val storageAdvice = when {
             storage == null -> "Пока не удалось получить данные хранилища. Попробуй обновить экран позже."
             usedFraction >= 0.9f -> "Свободного места мало. Рекомендуем проверить крупные и временные файлы."
             usedFraction >= 0.75f -> "Хранилище постепенно заполняется. Можно проверить, что занимает больше всего места."
             else -> "С хранилищем всё в порядке. Продолжай пользоваться телефоном — мы поможем следить за состоянием."
         }
-        InfoCard("Подсказка Optimizer", storageAdvice)
-        InfoCard(
-            "Доступ к файлам",
-            if (hasStorageAccess(context)) "Доступ к общему хранилищу предоставлен."
-            else "Открой «Очистка» и выдай разрешение «Доступ ко всем файлам»."
-        )
+        if (showTips) {
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("OPTIMIZER СОВЕТУЕТ", color = Peach, fontSize = 10.sp, letterSpacing = 1.8.sp)
+                    Text("Листай →", color = Muted, fontSize = 10.sp)
+                }
+                val pagerState = rememberPagerState(pageCount = { tips.size })
+                HorizontalPager(state = pagerState, modifier = Modifier.fillMaxWidth()) { page ->
+                    InfoCard(
+                        if (page == 0) "Подсказка Optimizer · Состояние" else "Подсказка Optimizer · ${page + 1}/${tips.size}",
+                        if (page == 0) storageAdvice + "\n\n" + tips[page].second else tips[page].second
+                    )
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    repeat(tips.size) { index ->
+                        Box(
+                            Modifier.padding(horizontal = 3.dp)
+                                .size(if (pagerState.currentPage == index) 8.dp else 6.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(if (pagerState.currentPage == index) Accent else Muted.copy(alpha = 0.5f))
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -772,9 +802,13 @@ private fun Settings(context: Context) {
     var enabled by remember { mutableStateOf(prefs.getBoolean("auto_clean_enabled", false)) }
     var cleanAppCache by remember { mutableStateOf(prefs.getBoolean("auto_clean_app_cache", true)) }
     var cleanTempFiles by remember { mutableStateOf(prefs.getBoolean("auto_clean_temp_files", true)) }
-    var intervalDays by remember { mutableIntStateOf(prefs.getInt("auto_clean_interval_days", 1).coerceIn(1, 7)) }
-    var cleanHour by remember { mutableIntStateOf(prefs.getInt("auto_clean_hour", 3).coerceIn(0, 23)) }
-    var cleanMinute by remember { mutableIntStateOf(prefs.getInt("auto_clean_minute", 0).coerceIn(0, 59)) }
+    var intervalMinutes by remember {
+        mutableIntStateOf(
+            prefs.getInt("auto_clean_interval_minutes", prefs.getInt("auto_clean_interval_days", 1) * 1440)
+                .coerceIn(30, 10080)
+        )
+    }
+    var showTips by remember { mutableStateOf(prefs.getBoolean("show_optimizer_tips", true)) }
     var refreshToken by remember { mutableIntStateOf(0) }
     var hasAccess by remember { mutableStateOf(hasStorageAccess(context)) }
 
@@ -785,9 +819,11 @@ private fun Settings(context: Context) {
                 enabled = prefs.getBoolean("auto_clean_enabled", false)
                 cleanAppCache = prefs.getBoolean("auto_clean_app_cache", true)
                 cleanTempFiles = prefs.getBoolean("auto_clean_temp_files", true)
-                intervalDays = prefs.getInt("auto_clean_interval_days", 1).coerceIn(1, 7)
-                cleanHour = prefs.getInt("auto_clean_hour", 3).coerceIn(0, 23)
-                cleanMinute = prefs.getInt("auto_clean_minute", 0).coerceIn(0, 59)
+                intervalMinutes = prefs.getInt(
+                    "auto_clean_interval_minutes",
+                    prefs.getInt("auto_clean_interval_days", 1) * 1440
+                ).coerceIn(30, 10080)
+                showTips = prefs.getBoolean("show_optimizer_tips", true)
                 hasAccess = hasStorageAccess(context)
                 refreshToken++
             }
@@ -826,42 +862,60 @@ private fun Settings(context: Context) {
         }
 
         if (enabled) {
-            ScreenSectionLabel("РАСПИСАНИЕ")
-            FeatureCard("Время запуска", "%02d:%02d".format(cleanHour, cleanMinute) + " · выбранное время очистки", Peach)
-            PrimaryActionButton("Изменить время", onClick = {
-                TimePickerDialog(context, { _, hour, minute ->
-                    cleanHour = hour
-                    cleanMinute = minute
-                    prefs.edit().putInt("auto_clean_hour", hour).putInt("auto_clean_minute", minute).apply()
-                    if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
-                }, cleanHour, cleanMinute, true).show()
-            }, modifier = Modifier.fillMaxWidth())
-
-            ScreenSectionLabel("ЧАСТОТА")
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(1, 3, 7).forEach { days ->
-                    val selected = intervalDays == days
-                    androidx.compose.material3.Surface(
-                        onClick = {
-                            intervalDays = days
-                            prefs.edit().putInt("auto_clean_interval_days", days).apply()
-                            if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
-                        },
-                        modifier = Modifier.weight(1f),
-                        color = if (selected) Accent.copy(alpha = 0.18f) else Panel,
-                        shape = RoundedCornerShape(16.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) Accent else Color.White.copy(alpha = 0.07f))
-                    ) {
-                        Column(
-                            Modifier.padding(vertical = 13.dp, horizontal = 5.dp),
-                            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+            ScreenSectionLabel("ИНТЕРВАЛ АВТООЧИСТКИ")
+            Text(
+                "Повторять: " + when (intervalMinutes) {
+                    30 -> "каждые 30 минут"
+                    60 -> "каждый час"
+                    120 -> "каждые 2 часа"
+                    360 -> "каждые 6 часов"
+                    720 -> "каждые 12 часов"
+                    1440 -> "раз в сутки"
+                    4320 -> "раз в 3 дня"
+                    10080 -> "раз в 7 дней"
+                    else -> "каждые $intervalMinutes минут"
+                },
+                color = Color.White,
+                fontSize = 17.sp
+            )
+            val intervalOptions = listOf(
+                30 to "30 мин", 60 to "1 час", 120 to "2 часа", 360 to "6 часов",
+                720 to "12 часов", 1440 to "24 часа", 4320 to "3 дня", 10080 to "7 дней"
+            )
+            intervalOptions.chunked(4).forEach { group ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    group.forEach { (minutes, label) ->
+                        val selected = intervalMinutes == minutes
+                        androidx.compose.material3.Surface(
+                            onClick = {
+                                intervalMinutes = minutes
+                                prefs.edit().putInt("auto_clean_interval_minutes", minutes).apply()
+                                if (enabled && (cleanAppCache || cleanTempFiles)) scheduleAutoClean(context)
+                            },
+                            modifier = Modifier.weight(1f),
+                            color = if (selected) Accent.copy(alpha = 0.18f) else Panel,
+                            shape = RoundedCornerShape(15.dp),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (selected) Accent else Color.White.copy(alpha = 0.07f)
+                            )
                         ) {
-                            Text(when (days) { 1 -> "1"; 3 -> "3"; else -> "7" }, color = if (selected) Accent else Color.White, fontSize = 19.sp)
-                            Text(when (days) { 1 -> "день"; 3 -> "дня"; else -> "дней" }, color = Muted, fontSize = 11.sp)
+                            Text(
+                                label,
+                                Modifier.padding(vertical = 13.dp, horizontal = 3.dp),
+                                color = if (selected) Accent else Color.White,
+                                fontSize = 11.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
                         }
                     }
+                    repeat(4 - group.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
+            InfoCard(
+                "Как работает интервал",
+                "После включения очистка будет запускаться с выбранной периодичностью. Android может задержать фоновую задачу из-за энергосбережения или нагрузки."
+            )
 
             ScreenSectionLabel("ЧТО ОЧИЩАТЬ")
             SettingToggle("Кэш Project Optimizer", "Временные файлы самого оптимизатора.", cleanAppCache) { checked ->
@@ -885,7 +939,17 @@ private fun Settings(context: Context) {
             }
         }
 
-        ScreenSectionLabel("ИСТОРИЯ И БЕЗОПАСНОСТЬ")
+        ScreenSectionLabel("ОСНОВНЫЕ НАСТРОЙКИ")
+        SettingToggle(
+            "Подсказки на главной",
+            "Показывать карточки с советами по уходу за телефоном.",
+            showTips
+        ) { checked ->
+            showTips = checked
+            prefs.edit().putBoolean("show_optimizer_tips", checked).apply()
+        }
+
+        ScreenSectionLabel("ИСТОРИЯ ОЧИСТКИ")
         InfoCard(
             "Последняя очистка",
             if (lastRun > 0L) {
@@ -893,11 +957,7 @@ private fun Settings(context: Context) {
                     "Оценочно удалено: " + formatStorageBytes(context, lastFreed)
             } else "Автоматическая очистка ещё не запускалась."
         )
-        InfoCard(
-            "Ограничения Android",
-            "Android 11+ закрывает приватные каталоги других приложений и часть Android/data и Android/obb. Обычное приложение не может безопасно обойти эти ограничения. Фото, видео, музыка, документы, данные мессенджеров и резервные копии защищены от автоудаления."
-        )
-        InfoCard("Конфиденциальность", "Настройки и расписание хранятся на телефоне. Список личных файлов никуда не отправляется.")
+undefined
     }
 }
 @Composable
@@ -1033,18 +1093,11 @@ private const val AUTO_CLEAN_WORK_NAME = "project_optimizer_auto_clean"
 
 private fun scheduleAutoClean(context: Context) {
     val prefs = context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE)
-    val intervalDays = prefs.getInt("auto_clean_interval_days", 1).coerceIn(1, 7)
-    val hour = prefs.getInt("auto_clean_hour", 3).coerceIn(0, 23)
-    val minute = prefs.getInt("auto_clean_minute", 0).coerceIn(0, 59)
-    val now = Calendar.getInstance()
-    val next = Calendar.getInstance().apply {
-        set(Calendar.HOUR_OF_DAY, hour)
-        set(Calendar.MINUTE, minute)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-        while (timeInMillis <= now.timeInMillis) add(Calendar.DAY_OF_YEAR, intervalDays)
-    }
-    val delay = (next.timeInMillis - now.timeInMillis).coerceAtLeast(1L)
+    val intervalMinutes = prefs.getInt(
+        "auto_clean_interval_minutes",
+        prefs.getInt("auto_clean_interval_days", 1) * 1440
+    ).coerceIn(30, 10080)
+    val delay = intervalMinutes.toLong() * 60_000L
     val constraints = Constraints.Builder().setRequiresBatteryNotLow(true).build()
     val request = OneTimeWorkRequestBuilder<AutoCleanWorker>()
         .setInitialDelay(delay, TimeUnit.MILLISECONDS)
