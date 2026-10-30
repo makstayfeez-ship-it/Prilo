@@ -6,6 +6,11 @@ import android.app.usage.StorageStatsManager
 import android.content.Intent
 import android.provider.Settings
 import android.content.Context
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Path
+import androidx.compose.foundation.Canvas
+import android.os.BatteryManager
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -291,13 +296,7 @@ private fun Dashboard(context: Context) {
     val usedLabel = storage?.let { formatStorageBytes(context, it.usedBytes) } ?: "—"
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text("ТВОЁ УСТРОЙСТВО", color = Peach, fontSize = 10.sp, letterSpacing = 2.sp)
-                Text("Всё под контролем", color = Color(0xFFF4F5F1), fontSize = 21.sp)
-            }
-            Text("● ONLINE", color = Accent, fontSize = 10.sp, letterSpacing = 1.sp)
-        }
+        ScreenHeading("DEVICE OVERVIEW", "Состояние телефона", "Главные показатели устройства в одном месте.")
         StorageHeroCard(
             free = freeLabel,
             total = totalLabel,
@@ -306,8 +305,8 @@ private fun Dashboard(context: Context) {
             source = storage?.source ?: "Считываем хранилище Android"
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MetricCard("Оперативная память", memoryInfo(context), Modifier.weight(1f))
-            MetricCard("Нагрев устройства", thermalInfo(context), Modifier.weight(1f))
+            MetricCard("Свободная RAM", availableMemoryLabel(context), Modifier.weight(1f))
+            MetricCard("Нагрев", thermalInfo(context), Modifier.weight(1f))
         }
         val prefs = remember { context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE) }
     var showTips by remember { mutableStateOf(prefs.getBoolean("show_optimizer_tips", true)) }
@@ -1069,40 +1068,84 @@ private fun GameStatPill(text: String) {
 
 @Composable
 private fun Monitoring(context: Context) {
-    val stats = rememberStorageStats(context)
-    val memory = runCatching {
-        val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        val info = ActivityManager.MemoryInfo()
-        manager.getMemoryInfo(info)
-        val total = info.totalMem.coerceAtLeast(1L)
-        val free = info.availMem.coerceIn(0L, total)
-        Triple(free, total, 1f - free.toFloat() / total.toFloat())
-    }.getOrNull()
+    val prefs = remember { context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE) }
+    var monitoredStorage by remember { mutableStateOf<StorageSnapshot?>(null) }
+    var memory by remember { mutableStateOf<Triple<Long, Long, Float>?>(null) }
+    var battery by remember { mutableStateOf(readBatterySnapshot(context)) }
+    var ramHistory by remember {
+        mutableStateOf(
+            prefs.getString("monitor_ram_history", "").orEmpty()
+                .split(",").mapNotNull { it.toFloatOrNull() }.takeLast(36)
+        )
+    }
+    var storageHistory by remember {
+        mutableStateOf(
+            prefs.getString("monitor_storage_history", "").orEmpty()
+                .split(",").mapNotNull { it.toFloatOrNull() }.takeLast(36)
+        )
+    }
+    var refreshTick by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(context) {
+        while (true) {
+            val freshStorage = withContext(Dispatchers.IO) { readStorageStats(context) }
+            val freshMemory = withContext(Dispatchers.IO) { readMemorySnapshot(context) }
+            val freshBattery = readBatterySnapshot(context)
+            monitoredStorage = freshStorage
+            memory = freshMemory
+            battery = freshBattery
+
+            freshMemory?.let { current ->
+                ramHistory = (ramHistory + current.third).takeLast(36)
+                prefs.edit().putString("monitor_ram_history", ramHistory.joinToString(",")).apply()
+            }
+            freshStorage?.let { current ->
+                val used = current.usedBytes.toFloat() / current.totalBytes.coerceAtLeast(1L).toFloat()
+                storageHistory = (storageHistory + used.coerceIn(0f, 1f)).takeLast(36)
+                prefs.edit().putString("monitor_storage_history", storageHistory.joinToString(",")).apply()
+            }
+            refreshTick++
+            delay(15_000L)
+        }
+    }
+    val stats = monitoredStorage
     val storageFraction = stats?.let {
         (it.usedBytes.toFloat() / it.totalBytes.coerceAtLeast(1L)).coerceIn(0f, 1f)
     } ?: 0f
     val memoryFraction = memory?.third ?: 0f
     val animatedStorage by animateFloatAsState(storageFraction, tween(850), label = "monitor_storage")
     val animatedMemory by animateFloatAsState(memoryFraction, tween(850), label = "monitor_memory")
+    val thermal = thermalInfo(context)
 
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        ScreenHeading("DEVICE HEALTH", "Мониторинг", "Основные показатели телефона в одном месте.")
+    Column(verticalArrangement = Arrangement.spacedBy(15.dp)) {
+        ScreenHeading("LIVE DEVICE ANALYTICS", "Мониторинг", "Показатели обновляются, пока открыт этот экран.")
         MonitorMetricCard(
             title = "Хранилище",
             value = stats?.let { formatStorageBytes(context, it.freeBytes) } ?: "Проверка…",
             subtitle = stats?.let { "Свободно из " + formatStorageBytes(context, it.totalBytes) } ?: "Ожидаем данные Android",
-            fraction = animatedStorage,
+            fraction = 1f - animatedStorage,
             tint = Accent,
             inverse = true
         )
         MonitorMetricCard(
             title = "Оперативная память",
-            value = memory?.let { formatStorageBytes(context, it.first) } ?: memoryInfo(context),
+            value = memory?.let { formatStorageBytes(context, it.first) } ?: "Проверка…",
             subtitle = memory?.let { "Свободно из " + formatStorageBytes(context, it.second) } ?: "Показатель доступной RAM",
-            fraction = animatedMemory,
+            fraction = 1f - animatedMemory,
             tint = Peach
         )
-        val thermal = thermalInfo(context)
+        MonitorMetricCard(
+            title = "Аккумулятор",
+            value = battery?.let { "${it.percent}%" } ?: "Нет данных",
+            subtitle = battery?.let {
+                buildString {
+                    append(if (it.charging) "Заряжается" else "Работает от батареи")
+                    it.temperatureC?.let { temp -> append(" · батарея ${String.format(Locale.getDefault(), "%.1f", temp)} °C") }
+                }
+            } ?: "Системная информация недоступна",
+            fraction = (battery?.percent ?: 0).coerceIn(0, 100) / 100f,
+            tint = Coral
+        )
         FeatureCard(
             "Тепловое состояние",
             thermal,
@@ -1112,14 +1155,88 @@ private fun Monitoring(context: Context) {
                 else -> Accent
             }
         )
-        InfoCard(
-            "Как читать показатели",
-            "Свободная RAM — память, доступная Android прямо сейчас. Система сама перераспределяет её между приложениями. Свободное место показывает запас накопителя, а тепловой статус помогает заметить нагрев."
+        ScreenSectionLabel("ИСТОРИЯ ПОКАЗАТЕЛЕЙ")
+        TrendLineChart("Загрузка RAM", ramHistory, Peach)
+        TrendLineChart("Заполнение хранилища", storageHistory, Accent)
+        Text(
+            "Графики собирают точки только пока открыт экран мониторинга. После закрытия приложения сбор останавливается.",
+            color = Muted,
+            fontSize = 10.sp,
+            lineHeight = 15.sp
         )
-        ScreenSectionLabel("ИСТОЧНИК ДАННЫХ")
-        InfoCard("Хранилище", stats?.source ?: "Данные хранилища пока недоступны.")
     }
 }
+
+private data class BatterySnapshot(
+    val percent: Int,
+    val charging: Boolean,
+    val temperatureC: Float?
+)
+
+private fun readBatterySnapshot(context: Context): BatterySnapshot? = runCatching {
+    val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return null
+    val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+    val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+    if (level < 0 || scale <= 0) return null
+    val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+    val rawTemperature = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1)
+    BatterySnapshot(
+        percent = (level * 100f / scale).toInt().coerceIn(0, 100),
+        charging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL,
+        temperatureC = rawTemperature.takeIf { it > 0 }?.div(10f)
+    )
+}.getOrNull()
+
+private fun readMemorySnapshot(context: Context): Triple<Long, Long, Float>? = runCatching {
+    val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+    val info = ActivityManager.MemoryInfo()
+    manager.getMemoryInfo(info)
+    val total = info.totalMem.coerceAtLeast(1L)
+    val free = info.availMem.coerceIn(0L, total)
+    Triple(free, total, 1f - free.toFloat() / total.toFloat())
+}.getOrNull()
+
+@Composable
+private fun TrendLineChart(title: String, values: List<Float>, tint: Color) {
+    Column(
+        Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(22.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.055f), RoundedCornerShape(22.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(title, color = Color.White, fontSize = 14.sp)
+            Text(if (values.isEmpty()) "Сбор данных" else "${values.size} точек", color = Muted, fontSize = 10.sp)
+        }
+        if (values.size < 2) {
+            Box(Modifier.fillMaxWidth().height(74.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                Text("Нужно немного времени для графика", color = Muted, fontSize = 11.sp)
+            }
+        } else {
+            Canvas(Modifier.fillMaxWidth().height(74.dp)) {
+                val path = Path()
+                values.forEachIndexed { index, value ->
+                    val x = size.width * index / (values.size - 1).toFloat()
+                    val y = size.height * (1f - value.coerceIn(0f, 1f))
+                    if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+                drawLine(
+                    color = Color.White.copy(alpha = 0.08f),
+                    start = androidx.compose.ui.geometry.Offset(0f, size.height * 0.5f),
+                    end = androidx.compose.ui.geometry.Offset(size.width, size.height * 0.5f),
+                    strokeWidth = 1.dp.toPx()
+                )
+                drawPath(path = path, color = tint, style = Stroke(width = 2.8.dp.toPx()))
+            }
+        }
+        Text(
+            values.lastOrNull()?.let { "${(it * 100).toInt()}%" } ?: "—",
+            color = tint,
+            fontSize = 12.sp
+        )
+    }
+}
+
 @Composable
 private fun Settings(context: Context) {
     val prefs = remember { context.getSharedPreferences("optimizer_storage", Context.MODE_PRIVATE) }
@@ -1695,6 +1812,13 @@ private fun requestAllFilesAccess(context: Context) {
         context.requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE), 702)
     }
 }
+private fun availableMemoryLabel(context: Context): String = runCatching {
+    val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+    val info = ActivityManager.MemoryInfo()
+    manager.getMemoryInfo(info)
+    formatStorageBytes(context, info.availMem)
+}.getOrDefault("—")
+
 private fun memoryInfo(context: Context): String = runCatching {
     val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
     val info = ActivityManager.MemoryInfo()
