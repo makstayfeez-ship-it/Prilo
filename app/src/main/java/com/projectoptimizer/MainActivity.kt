@@ -492,26 +492,17 @@ private fun clearOwnAppCache(context: Context): Long {
     }
 }
 
+// Показываем именно внутреннее пользовательское хранилище телефона.
+ // StatFs.availableBytes учитывает место, доступное обычным приложениям,
+ // в отличие от getFreeBytes(), который может включать зарезервированные блоки.
 private fun storageStats(context: Context): Pair<Long, Long> = runCatching {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        val storageManager = context.getSystemService(StorageManager::class.java)
-        val statsManager = context.getSystemService(StorageStatsManager::class.java)
-        val uuid = storageManager.getUuidForPath(Environment.getExternalStorageDirectory())
-        val total = statsManager.getTotalBytes(uuid)
-        val free = statsManager.getFreeBytes(uuid).coerceIn(0L, total)
-        total to free
-    } else {
-        val stat = StatFs(Environment.getExternalStorageDirectory().absolutePath)
-        val total = stat.totalBytes
-        total to stat.availableBytes.coerceIn(0L, total)
-    }
-}.getOrElse {
-    runCatching {
-        val stat = StatFs(Environment.getExternalStorageDirectory().absolutePath)
-        val total = stat.totalBytes
-        total to stat.availableBytes.coerceIn(0L, total)
-    }.getOrElse { 0L to 0L }
-}
+    val dataPath = Environment.getDataDirectory().absolutePath
+    val stat = StatFs(dataPath)
+    val total = stat.totalBytes.coerceAtLeast(0L)
+    val free = stat.availableBytes.coerceIn(0L, total)
+    total to free
+}.getOrElse { 0L to 0L }
+
 private fun hasStorageAccess(context: Context): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
     Environment.isExternalStorageManager()
 } else {
