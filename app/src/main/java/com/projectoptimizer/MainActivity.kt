@@ -28,6 +28,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -232,7 +235,14 @@ private fun OptimizerApp(context: Context) {
                         .padding(top = 18.dp, bottom = 92.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    AnimatedContent(targetState = selected, label = "premium_screen_transition") { page ->
+                    AnimatedContent(
+                        targetState = selected,
+                        transitionSpec = {
+                            (fadeIn(tween(230)) + slideInHorizontally(tween(260)) { it / 12 }) togetherWith
+                                (fadeOut(tween(170)) + slideOutHorizontally(tween(210)) { -it / 12 })
+                        },
+                        label = "premium_screen_transition"
+                    ) { page ->
                         when (page) {
                             0 -> Dashboard(context)
                             1 -> Cleaning(context)
@@ -537,11 +547,17 @@ private fun Cleaning(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Button(enabled = !scanning && !deleting, onClick = {
                 cacheFreeBefore = stats?.freeBytes ?: -1L
-                val ownCacheBytes = clearOwnAppCache(context)
-                status = "Кэш Project Optimizer очищен: ${formatBytes(ownCacheBytes)}. Запрашиваю системную очистку других приложений…"
-                runCatching { cacheLauncher.launch(Intent(StorageManager.ACTION_CLEAR_APP_CACHE)) }.onFailure {
-                    status = "Кэш Project Optimizer очищен: ${formatBytes(ownCacheBytes)}. Android не запустил общую очистку."
-                    cacheFreeBefore = -1L
+                deleting = true
+                scope.launch {
+                    val ownCacheBytes = withContext(Dispatchers.IO) { clearOwnAppCache(context) }
+                    deleting = false
+                    status = "Кэш Project Optimizer очищен: ${formatBytes(ownCacheBytes)}. Запрашиваю системную очистку других приложений…"
+                    runCatching {
+                        cacheLauncher.launch(Intent(StorageManager.ACTION_CLEAR_APP_CACHE))
+                    }.onFailure {
+                        status = "Кэш Project Optimizer очищен: ${formatBytes(ownCacheBytes)}. Android не запустил общую очистку."
+                        cacheFreeBefore = -1L
+                    }
                 }
             }, modifier = Modifier.fillMaxWidth()) { Text("Очистить кэш") }
             InfoCard("Кэш приложений", "Закрытый кэш других приложений может очищать только Android. После возврата приложение сравнит свободное место и покажет фактический прирост.")
