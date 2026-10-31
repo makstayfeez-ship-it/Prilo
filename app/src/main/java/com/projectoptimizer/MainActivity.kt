@@ -566,26 +566,33 @@ private fun Cleaning(context: Context) {
                     Text("↻", color = Accent, fontSize = 23.sp, modifier = Modifier.clickable { scanned = false }.padding(5.dp))
                 }
                 val categoryOptions = listOf(
-                    null to "Все",
-                    FileKind.VIDEO to "Видео",
-                    FileKind.PHOTO to "Фото",
-                    FileKind.CACHE to "Кэш",
-                    FileKind.AUDIO to "Аудио",
-                    FileKind.ARCHIVE to "Архивы",
-                    FileKind.GIF to "GIF",
-                    FileKind.OTHER to "Другие"
+                    FileKind.VIDEO to "Видео", FileKind.PHOTO to "Фото", FileKind.CACHE to "Кэш",
+                    FileKind.AUDIO to "Аудио", FileKind.ARCHIVE to "Архивы", FileKind.GIF to "GIF", FileKind.OTHER to "Другие файлы"
                 )
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     categoryOptions.forEach { (kind, label) ->
+                        val categoryFiles = files.filter { it.kind == kind && it.uri.toString() !in locked }
+                        val categoryBytes = categoryFiles.sumOf { it.size }
                         val active = selectedCategory == kind
-                        androidx.compose.material3.Surface(
-                            onClick = { selectedCategory = kind; limit = 100 },
-                            color = if (active) Accent.copy(alpha = .18f) else Color(0xFF26353A),
-                            shape = RoundedCornerShape(30.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, if (active) Accent else Color.White.copy(alpha = .06f))
-                        ) {
-                            Text(label + " · " + files.count { it.kind == kind || kind == null }.toString(), Modifier.padding(horizontal = 13.dp, vertical = 9.dp), color = if (active) Accent else Color.White, fontSize = 10.sp)
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(if (active) Color(0xFF30463F) else Color(0xFF202D32)).border(1.dp, if (active) Accent.copy(alpha = .65f) else Color.White.copy(alpha = .06f), RoundedCornerShape(18.dp)).clickable { selectedCategory = if (active) null else kind; limit = 100 }.padding(14.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Box(Modifier.size(42.dp).clip(RoundedCornerShape(13.dp)).background(Color(0xFF34464A)), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                Text(when (kind) { FileKind.VIDEO -> "▶"; FileKind.PHOTO -> "▧"; FileKind.CACHE -> "⌁"; FileKind.AUDIO -> "♫"; FileKind.ARCHIVE -> "ZIP"; FileKind.GIF -> "GIF"; else -> "▤" }, color = Accent, fontSize = 14.sp)
+                            }
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(label, color = Color.White, fontSize = 14.sp)
+                                Text("${categoryFiles.size} файлов · ${formatBytes(categoryBytes)}", color = Muted, fontSize = 10.sp)
+                            }
+                            Text(if (active) "ОТКРЫТО" else "ОТКРЫТЬ", color = Accent, fontSize = 9.sp, letterSpacing = .8.sp)
                         }
+                    }
+                }
+                if (selectedCategory != null) {
+                    val currentCategoryFiles = files.filter { it.kind == selectedCategory && it.uri.toString() !in locked }
+                    val safeCategoryFiles = eligible.filter { it.kind == selectedCategory }
+                    if (safeCategoryFiles.isNotEmpty()) {
+                        PrimaryActionButton("Очистить категорию · ${formatBytes(safeCategoryFiles.sumOf { it.size })}", onClick = { selected = safeCategoryFiles.map { it.uri.toString() }.toSet(); showDialog = true }, modifier = Modifier.fillMaxWidth())
+                    } else if (currentCategoryFiles.isNotEmpty()) {
+                        Text("Личные файлы этой категории можно отметить вручную ниже. Они не удаляются автоматически.", color = Muted, fontSize = 11.sp)
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
