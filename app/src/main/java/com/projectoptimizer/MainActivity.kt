@@ -409,36 +409,8 @@ private fun Cleaning(context: Context) {
     var allowOld by remember { mutableStateOf(prefs.getBoolean("allow_old", false)) }
     var allowDuplicates by remember { mutableStateOf(prefs.getBoolean("allow_duplicates", true)) }
     var oldDays by remember { mutableIntStateOf(prefs.getInt("old_days", 180).coerceIn(7, 730)) }
-    var cacheFreeBefore by remember { mutableLongStateOf(-1L) }
     var lastDeleted by remember { mutableStateOf("Пока ничего не удалено.") }
     val scope = rememberCoroutineScope()
-    var extraFolder by remember { mutableStateOf(prefs.getString("extra_folder_uri", null)) }
-    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
-            extraFolder = uri.toString()
-            prefs.edit().putString("extra_folder_uri", uri.toString()).apply()
-            status = "Дополнительная папка подключена. Запусти поиск ещё раз."
-        }
-    }
-    val cacheLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        val freeBefore = cacheFreeBefore
-        scope.launch {
-            val freshStats = withContext(Dispatchers.IO) { readStorageStats(context) }
-            val gained = if (freeBefore >= 0 && freshStats != null) {
-                (freshStats.freeBytes - freeBefore).coerceAtLeast(0L)
-            } else null
-            status = when {
-                gained != null && gained > 0L ->
-                    "После системного запроса свободного места стало больше на ${formatStorageBytes(context, gained)}."
-                freshStats == null ->
-                    "Android вернул управление, но не удалось повторно прочитать память."
-                else ->
-                    "Android вернул управление, но прирост свободного места не обнаружен. Система могла не выполнить очистку."
-            }
-            cacheFreeBefore = -1L
-        }
-    }
     val protected = setOf(FileKind.PHOTO, FileKind.VIDEO, FileKind.AUDIO)
     val duplicates = remember(files) { files.filter { it.sha256 != null && it.size > 0 }.groupBy { it.sha256 }.values.filter { it.size > 1 }.flatMap { it.drop(1) }.map { it.uri }.toSet() }
     val cutoff = System.currentTimeMillis() / 1000 - oldDays.toLong() * 86400L
@@ -522,9 +494,8 @@ private fun Cleaning(context: Context) {
                     scanning = true; scanned = false; showLocked = false; foundCount = 0; selected = emptySet(); status = "Идёт поиск файлов…"
                     scope.launch {
                         val result = withContext(Dispatchers.IO) {
-                            val shared = scanAllFiles { n -> if (n % 100 == 0) scope.launch(Dispatchers.Main) { foundCount = n } }
-                            val extra = extraFolder?.let { scanDocumentTree(context, Uri.parse(it)) }.orEmpty()
-                            (shared + extra).distinctBy { it.uri }
+                            delay(900)
+                            scanAllFiles { n -> if (n % 100 == 0) scope.launch(Dispatchers.Main) { foundCount = n } }
                         }
                         files = result
                         selected = result.filter { file -> file.kind !in protected && ((allowGif && file.kind == FileKind.GIF) || (allowArchives && file.kind == FileKind.ARCHIVE) || (allowOld && file.modified > 0 && file.modified < cutoff)) }.map { it.uri.toString() }.toSet()
