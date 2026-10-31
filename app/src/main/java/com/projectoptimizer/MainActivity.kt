@@ -409,36 +409,8 @@ private fun Cleaning(context: Context) {
     var allowOld by remember { mutableStateOf(prefs.getBoolean("allow_old", false)) }
     var allowDuplicates by remember { mutableStateOf(prefs.getBoolean("allow_duplicates", true)) }
     var oldDays by remember { mutableIntStateOf(prefs.getInt("old_days", 180).coerceIn(7, 730)) }
-    var cacheFreeBefore by remember { mutableLongStateOf(-1L) }
     var lastDeleted by remember { mutableStateOf("Пока ничего не удалено.") }
     val scope = rememberCoroutineScope()
-    var extraFolder by remember { mutableStateOf(prefs.getString("extra_folder_uri", null)) }
-    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
-            extraFolder = uri.toString()
-            prefs.edit().putString("extra_folder_uri", uri.toString()).apply()
-            status = "Дополнительная папка подключена. Запусти поиск ещё раз."
-        }
-    }
-    val cacheLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        val freeBefore = cacheFreeBefore
-        scope.launch {
-            val freshStats = withContext(Dispatchers.IO) { readStorageStats(context) }
-            val gained = if (freeBefore >= 0 && freshStats != null) {
-                (freshStats.freeBytes - freeBefore).coerceAtLeast(0L)
-            } else null
-            status = when {
-                gained != null && gained > 0L ->
-                    "После системного запроса свободного места стало больше на ${formatStorageBytes(context, gained)}."
-                freshStats == null ->
-                    "Android вернул управление, но не удалось повторно прочитать память."
-                else ->
-                    "Android вернул управление, но прирост свободного места не обнаружен. Система могла не выполнить очистку."
-            }
-            cacheFreeBefore = -1L
-        }
-    }
     val protected = setOf(FileKind.PHOTO, FileKind.VIDEO, FileKind.AUDIO)
     val duplicates = remember(files) { files.filter { it.sha256 != null && it.size > 0 }.groupBy { it.sha256 }.values.filter { it.size > 1 }.flatMap { it.drop(1) }.map { it.uri }.toSet() }
     val cutoff = System.currentTimeMillis() / 1000 - oldDays.toLong() * 86400L
@@ -522,9 +494,8 @@ private fun Cleaning(context: Context) {
                     scanning = true; scanned = false; showLocked = false; foundCount = 0; selected = emptySet(); status = "Идёт поиск файлов…"
                     scope.launch {
                         val result = withContext(Dispatchers.IO) {
-                            val shared = scanAllFiles { n -> if (n % 100 == 0) scope.launch(Dispatchers.Main) { foundCount = n } }
-                            val extra = extraFolder?.let { scanDocumentTree(context, Uri.parse(it)) }.orEmpty()
-                            (shared + extra).distinctBy { it.uri }
+                            delay(900)
+                            scanAllFiles { n -> if (n % 100 == 0) scope.launch(Dispatchers.Main) { foundCount = n } }
                         }
                         files = result
                         selected = result.filter { file -> file.kind !in protected && ((allowGif && file.kind == FileKind.GIF) || (allowArchives && file.kind == FileKind.ARCHIVE) || (allowOld && file.modified > 0 && file.modified < cutoff)) }.map { it.uri.toString() }.toSet()
@@ -595,26 +566,33 @@ private fun Cleaning(context: Context) {
                     Text("↻", color = Accent, fontSize = 23.sp, modifier = Modifier.clickable { scanned = false }.padding(5.dp))
                 }
                 val categoryOptions = listOf(
-                    null to "Все",
-                    FileKind.VIDEO to "Видео",
-                    FileKind.PHOTO to "Фото",
-                    FileKind.CACHE to "Кэш",
-                    FileKind.AUDIO to "Аудио",
-                    FileKind.ARCHIVE to "Архивы",
-                    FileKind.GIF to "GIF",
-                    FileKind.OTHER to "Другие"
+                    FileKind.VIDEO to "Видео", FileKind.PHOTO to "Фото", FileKind.CACHE to "Кэш",
+                    FileKind.AUDIO to "Аудио", FileKind.ARCHIVE to "Архивы", FileKind.GIF to "GIF", FileKind.OTHER to "Другие файлы"
                 )
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     categoryOptions.forEach { (kind, label) ->
+                        val categoryFiles = files.filter { it.kind == kind && it.uri.toString() !in locked }
+                        val categoryBytes = categoryFiles.sumOf { it.size }
                         val active = selectedCategory == kind
-                        androidx.compose.material3.Surface(
-                            onClick = { selectedCategory = kind; limit = 100 },
-                            color = if (active) Accent.copy(alpha = .18f) else Color(0xFF26353A),
-                            shape = RoundedCornerShape(30.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, if (active) Accent else Color.White.copy(alpha = .06f))
-                        ) {
-                            Text(label + " · " + files.count { it.kind == kind || kind == null }.toString(), Modifier.padding(horizontal = 13.dp, vertical = 9.dp), color = if (active) Accent else Color.White, fontSize = 10.sp)
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(if (active) Color(0xFF30463F) else Color(0xFF202D32)).border(1.dp, if (active) Accent.copy(alpha = .65f) else Color.White.copy(alpha = .06f), RoundedCornerShape(18.dp)).clickable { selectedCategory = if (active) null else kind; limit = 100 }.padding(14.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Box(Modifier.size(42.dp).clip(RoundedCornerShape(13.dp)).background(Color(0xFF34464A)), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                Text(when (kind) { FileKind.VIDEO -> "▶"; FileKind.PHOTO -> "▧"; FileKind.CACHE -> "⌁"; FileKind.AUDIO -> "♫"; FileKind.ARCHIVE -> "ZIP"; FileKind.GIF -> "GIF"; else -> "▤" }, color = Accent, fontSize = 14.sp)
+                            }
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(label, color = Color.White, fontSize = 14.sp)
+                                Text("${categoryFiles.size} файлов · ${formatBytes(categoryBytes)}", color = Muted, fontSize = 10.sp)
+                            }
+                            Text(if (active) "ОТКРЫТО" else "ОТКРЫТЬ", color = Accent, fontSize = 9.sp, letterSpacing = .8.sp)
                         }
+                    }
+                }
+                if (selectedCategory != null) {
+                    val currentCategoryFiles = files.filter { it.kind == selectedCategory && it.uri.toString() !in locked }
+                    val safeCategoryFiles = eligible.filter { it.kind == selectedCategory }
+                    if (safeCategoryFiles.isNotEmpty()) {
+                        PrimaryActionButton("Очистить категорию · ${formatBytes(safeCategoryFiles.sumOf { it.size })}", onClick = { selected = safeCategoryFiles.map { it.uri.toString() }.toSet(); showDialog = true }, modifier = Modifier.fillMaxWidth())
+                    } else if (currentCategoryFiles.isNotEmpty()) {
+                        Text("Личные файлы этой категории можно отметить вручную ниже. Они не удаляются автоматически.", color = Muted, fontSize = 11.sp)
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
